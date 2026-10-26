@@ -1,0 +1,68 @@
+name: Bug report
+description: Something failed (call, video, audio, crash, adding a contact, Bluetooth).
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please attach the report from Settings > Export diagnostics. It contains only the app version, the Windows
+        build, fixed on/off settings and scrubbed crash text: no media, traces, contact names, addresses or keys.
+        Do not attach photos, videos, recordings or screenshots of other people.
+        Security problems (authentication, encryption, key handling, privacy leaks): do not post details here. Report
+        them privately through GitHub Security Advisories (the repository's Security tab, "Report a vulnerability");
+        see SECURITY.md.
+  - type: input
+    id: pc
+    attributes:
+      label: PC and Windows version
+      description: PC model, Windows edition, version and build (Settings > System > About), x64 or ARM64.
+      placeholder: "Laptop model, Windows 11 Home 24H2 (build 26100.xxxx), x64"
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Bluetooth adapter
+      description: >-
+        Device Manager > Bluetooth: the adapter's name, and its USB vendor ID if you can find it (Properties >
+        Details > Hardware Ids, the 4 digits after VID_). Do not post its Bluetooth address.
+      placeholder: "Intel(R) Wireless Bluetooth(R), VID_8087"
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone(s) involved
+      description: Model and Android version, and the MeshLive app version on the phone.
+      placeholder: "Pixel 8, Android 15, MeshLive 0.3.0"
+  - type: input
+    id: app
+    attributes:
+      label: App version or commit
+      description: From Settings > About, or the commit you built.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: What were you doing
+      options: ["PC calls a phone", "Phone calls the PC", "Adding a contact", "Watching a stream (experimental)", "Going live (experimental)", "Starting the app / Bluetooth", "Other"]
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what did you expect
+      description: Include how far apart the devices were and whether other Bluetooth devices were busy nearby.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / how often
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: Paste the text saved by Settings > Export diagnostics.
+      render: text

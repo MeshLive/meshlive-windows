@@ -1,0 +1,98 @@
+{
+  "format": "MeshLive synthetic lossless video v1",
+  "license": "GPL-3.0-or-later; original generated pixels, no captured or third-party footage",
+  "provenance": "Generated here, not published Android codec vectors or peer interoperability evidence",
+  "generator": "scripts/generate_video_fixtures.py",
+  "tool": {
+    "version": "ffmpeg version 9.0-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "exe_sha256": "05f4251bce9293c2ab492cb17ca7724a0ffd0d06c881ba2ee83b82a89c2fc740",
+    "license": "GPL-3.0-or-later build (--enable-gpl --enable-version3); fixture-only, not bundled",
+    "source": "https://ffmpeg.org/"
+  },
+  "width": 64,
+  "height": 64,
+  "fps": 5,
+  "pixel_format": "yuv420p",
+  "matrix": "bt709",
+  "range": "limited",
+  "frames": [
+    {
+      "pts_us": 0,
+      "i420_sha256": "cddb5d009a15d6123d1e54228075308ef05d78e8351d4a3a81a356ce82be53f1"
+    },
+    {
+      "pts_us": 200000,
+      "i420_sha256": "3618a9fa010330e11f1271be957c04db15b6ea376dac68a0d28803a2a5b967ca"
+    },
+    {
+      "pts_us": 400000,
+      "i420_sha256": "0edbd612869a83f8d61f8a441e4a4fb2f73ba7e788e91e0450db0eca88fb6f62"
+    }
+  ],
+  "codecs": {
+    "vp9": {
+      "file": "video-vp9.ivf",
+      "sha256": "c0f4f3a594e53f783005722a147c62eb65f2f73ce85f69a9b0183d7bc0da36e2",
+      "packets": [
+        {
+          "bytes": 1352,
+          "ticks": 0,
+          "sha256": "4df08c6394e67ee2bc82ec4ed58fca5f2b2c8bf562bba7b57723129118d6a234"
+        },
+        {
+          "bytes": 1185,
+          "ticks": 1,
+          "sha256": "7634c08c083cefab48ad3201ad297e7bc41a63c4b664dbe639bcc305a2e465ec"
+        },
+        {
+          "bytes": 1001,
+          "ticks": 2,
+          "sha256": "37c3f14ea4f27beac2617eecf5bca36b421445492b08a34079bbb2ad5b13d1a9"
+        }
+      ],
+      "encoder": "libvpx-vp9",
+      "verification_decoder": "vp9",
+      "encoder_options": [
+        "-lossless",
+        "1",
+        "-deadline",
+        "good",
+        "-cpu-used",
+        "0"
+      ]
+    },
+    "av1": {
+      "file": "video-av1.ivf",
+      "sha256": "9cfc298acb74664541409d3d0ed81703e160d849813f66ea0dc7e218fda9f42a",
+      "packets": [
+        {
+          "bytes": 2882,
+          "ticks": 0,
+          "sha256": "421db7a66b9102b52cfb7960d740be9b9f859fac5b56af4f25b3094fd4824181"
+        },
+        {
+          "bytes": 1865,
+          "ticks": 1,
+          "sha256": "86b7826ad38f9294bdc7ea5c8e14afcc86889ca76e583269be8295143374c8f6"
+        },
+        {
+          "bytes": 1919,
+          "ticks": 2,
+          "sha256": "4cd007354b7e98413940e275e8c363ecfd5b4477a36faf678ec1f4e6e24f85ac"
+        }
+      ],
+      "encoder": "libaom-av1",
+      "verification_decoder": "libdav1d",
+      "encoder_options": [
+        "-crf",
+        "0",
+        "-b:v",
+        "0",
+        "-cpu-used",
+        "6",
+        "-aom-params",
+        "lossless=1"
+      ]
+    }
+  }
+}

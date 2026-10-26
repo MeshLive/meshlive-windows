@@ -1,0 +1,74 @@
+{
+  "renderer": {
+    "version": "0.12.1",
+    "archive": "https://static.crates.io/crates/egui-directx11/egui-directx11-0.12.1.crate",
+    "sha256": "a1a3fea83a5effd3fa95902753dd54021c263e49af39953424e7b25f84040cb6"
+  },
+  "files": {
+    "assets/icon.png": "7fed7b89f943de0bc2feb49bb695545ecadca44798c549bfd5628aaebd016e38",
+    "assets/fonts/NotoSans-Regular.ttf": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
+    "vendor/egui-directx11/shaders/egui.hlsl": "9b489ae27f6eb723096f9a815334ae855c2f5cf73ab876177c63f6e04a4c4287",
+    "vendor/egui-directx11/src/texture.rs": "cbac7cdbbf95747569e918e3c261c0fa808c652c18e1edfb829bcd6d407419e1",
+    "vendor/egui-directx11/LICENSE-MIT": "b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e",
+    "vendor/egui-directx11/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "tests/fixtures/android-vectors.json": "0c09640039f0a46af467aaee51729adbdc2c3f9b667e5b47cbb1e7d1f11c7359",
+    "tests/fixtures/bmh3-vectors.json": "01c6dfb65ae5324d94dd76effb7ef435157ee042faf24dcc32dfde88bea8b024",
+    "tests/fixtures/audio-live-vectors.json": "0f25c09955a725a43fd7104c951da717c657677489b008992b83c8d8a57287fb",
+    "licenses/libopus-COPYING.txt": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+    "tests/fixtures/video-vp9.ivf": "c0f4f3a594e53f783005722a147c62eb65f2f73ce85f69a9b0183d7bc0da36e2",
+    "tests/fixtures/video-av1.ivf": "9cfc298acb74664541409d3d0ed81703e160d849813f66ea0dc7e218fda9f42a",
+    "tests/fixtures/video-lossless.json": "bf19264ebca2dca5da0356ec814420fac138a0d933eb739f1e747e633c71f757",
+    "licenses/libaom-LICENSE.txt": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2",
+    "licenses/libaom-PATENTS.txt": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61",
+    "licenses/libvpx-LICENSE.txt": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615",
+    "licenses/libvpx-PATENTS.txt": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+  },
+  "native_audio": {
+    "version": "1.5.2",
+    "filename": "opus-1.5.2.tar.gz",
+    "url": "https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz",
+    "sha256": "65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1",
+    "license": "BSD-3-Clause"
+  },
+  "build_tools": {
+    "cmake": {
+      "version": "3.30.5",
+      "filename": "cmake-3.30.5-py3-none-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/74/ed/6624adba772329c9c8a9765ee2ee06df7082ad7ac75cf33200d405c4c45f/cmake-3.30.5-py3-none-win_amd64.whl",
+      "sha256": "dddb1c82e69c8cf79a314f57c2cbb1b3c152758fa0997a5f5ddf8fc8207c994a",
+      "license": "BSD-3-Clause AND Apache-2.0 plus upstream tool notices; build-only"
+    },
+    "nasm": {
+      "version": "2.16.03",
+      "filename": "nasm-2.16.03-win64.zip",
+      "url": "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip",
+      "sha256": "3ee4782247bcb874378d02f7eab4e294a84d3d15f3f6ee2de2f47a46aa7226e6",
+      "license": "BSD-2-Clause; build-only"
+    },
+    "make": {
+      "version": "4.4.1",
+      "filename": "make-4.4.1-without-guile-w32-bin.zip",
+      "url": "https://sourceforge.net/projects/ezwinports/files/make-4.4.1-without-guile-w32-bin.zip/download",
+      "sha256": "fb66a02b530f7466f6222ce53c0b602c5288e601547a034e4156a512dd895ee7",
+      "license": "GPL-3.0-or-later; build-only (ezwinports binary of GNU make)"
+    }
+  },
+  "native_video": {
+    "libaom": {
+      "version": "3.14.1",
+      "filename": "libaom-3.14.1.tar.gz",
+      "url": "https://storage.googleapis.com/aom-releases/libaom-3.14.1.tar.gz",
+      "sha256": "44bf90dbd23e734d50e70a8c41c285193922938bd0d3bc2ee56764d181d55ef5",
+      "license": "BSD-2-Clause plus the Alliance for Open Media Patent License 1.0",
+      "commit": "03087864cf4bea6abb0d28f95cf7843511413d8f"
+    },
+    "libvpx": {
+      "version": "1.17.0",
+      "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+      "filename": "libvpx-1.17.0.tar.gz",
+      "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webm/libvpx-1.17.0.tar.gz",
+      "sha256": "7f98aae5c52c46e85b7b26feabcab9b1554605e771bd1df1d6e6a00ee22fa8ed",
+      "license": "BSD-3-Clause plus the WebM additional IP rights grant (PATENTS)"
+    }
+  }
+}

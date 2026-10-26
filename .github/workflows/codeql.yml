@@ -1,0 +1,55 @@
+# CodeQL code scanning.
+#
+# Rust, Python (host scripts) and the workflows themselves are analysed with `build-mode: none`: CodeQL reads the
+# sources without compiling them. A full build needs the Windows SDK, Visual Studio Build Tools and the pinned
+# native codec sources (see ci.yml), which is too slow for every scan. Consequence: the C shims and the vendored
+# native codecs are NOT analysed, and `none` mode has less precise data flow than a built analysis.
+# If a repository-level "default setup" for code scanning is ever enabled, disable it first: the two
+# configurations conflict.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * 3"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write  # upload results
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: rust
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: "/language:${{ matrix.language }}"

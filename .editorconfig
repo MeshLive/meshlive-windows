@@ -1,0 +1,27 @@
+# Editor defaults for this repository: UTF-8, LF line endings, no trailing whitespace.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json,toml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Frozen upstream bytes (see vendor/egui-directx11/PROVENANCE.md and sources.lock.json): never reformat.
+[vendor/egui-directx11/{shaders/egui.hlsl,src/texture.rs}]
+end_of_line = unset
+trim_trailing_whitespace = unset
+insert_final_newline = unset
+charset = unset
+
+[{tests/fixtures/*,tests/vectors/**,assets/**,licenses/*}]
+trim_trailing_whitespace = unset
+insert_final_newline = unset

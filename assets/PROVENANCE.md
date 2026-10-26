@@ -1,0 +1,1 @@
+icon.png is the unchanged 512px MeshLive Android fastlane icon. Exact hash is in sources.lock.json. Runtime conversion only adds opaque alpha to its RGB pixels for the native window API; the original asset is unchanged. No personal photos or device captures.

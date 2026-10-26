@@ -1,0 +1,1387 @@
+{
+  "schema": "meshlive-conformance-vectors/1",
+  "area": "compact-discovery",
+  "android_commit": "bca3031f8dae52bc149eb55e84f3f3f18f47a623",
+  "vectors": [
+    {
+      "id": "compact-discovery-001",
+      "description": "Call offer, prefix 010203040506, LE CoC, VP9+AV1, cost 0 (decode and encode)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 58,
+        "method": "decodesAndEncodesTheSharedVectors"
+      },
+      "inputs": {
+        "uuid": "C8D64010-2030-4050-60C0-000000000000"
+      },
+      "expected": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Both directions are asserted: decode(uuid) == announcement and encode(announcement).toString().uppercase() == uuid. Same UUID is in docs/PROTOCOL.md 'Experimental iPhone compact discovery' Vectors table (agrees). Encoder emits uppercase. Announcement fields come from the test's fixture object (flags/summary as ints); the UUID is the literal."
+    },
+    {
+      "id": "compact-discovery-002",
+      "description": "Call offer, prefix a1b2c3d4e5f6, GATT, VP9, cost 2 (decode and encode)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 59,
+        "method": "decodesAndEncodesTheSharedVectors"
+      },
+      "inputs": {
+        "uuid": "C8D64A1B-2C3D-4E5F-6848-000000000000"
+      },
+      "expected": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "a1b2c3d4e5f6",
+          "flags": 73,
+          "capability_summary": 1,
+          "stream_token_hex": "00000000",
+          "route_cost": 2,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Both directions are asserted: decode(uuid) == announcement and encode(announcement).toString().uppercase() == uuid. Same UUID is in docs/PROTOCOL.md 'Experimental iPhone compact discovery' Vectors table (agrees). Encoder emits uppercase. Announcement fields come from the test's fixture object (flags/summary as ints); the UUID is the literal."
+    },
+    {
+      "id": "compact-discovery-003",
+      "description": "Viewer request, prefix 010203040506, LE CoC, VP9+AV1, token 0x9abcdef0, cost 0, 300 kbps (decode and encode)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 60,
+        "method": "decodesAndEncodesTheSharedVectors"
+      },
+      "inputs": {
+        "uuid": "C8D65010-2030-4050-60C0-D5E6F780C000"
+      },
+      "expected": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 1,
+          "capability_summary": 3,
+          "stream_token_hex": "9abcdef0",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Both directions are asserted: decode(uuid) == announcement and encode(announcement).toString().uppercase() == uuid. Same UUID is in docs/PROTOCOL.md 'Experimental iPhone compact discovery' Vectors table (agrees). Encoder emits uppercase. Announcement fields come from the test's fixture object (flags/summary as ints); the UUID is the literal."
+    },
+    {
+      "id": "compact-discovery-004",
+      "description": "Stream offer, prefix a1b2c3d4e5f6, GATT, relay capable, paused, VP9, cost 1, token 0xdeadbeef, sequence 0x85, 640x360, 15 FPS, 300 kbps (decode and encode)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 61,
+        "method": "decodesAndEncodesTheSharedVectors"
+      },
+      "inputs": {
+        "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A0C"
+      },
+      "expected": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "a1b2c3d4e5f6",
+          "flags": 46,
+          "capability_summary": 1,
+          "stream_token_hex": "deadbeef",
+          "route_cost": 1,
+          "sequence": 133,
+          "stream_width": 640,
+          "stream_height": 360,
+          "stream_fps": 15,
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Both directions are asserted: decode(uuid) == announcement and encode(announcement).toString().uppercase() == uuid. Same UUID is in docs/PROTOCOL.md 'Experimental iPhone compact discovery' Vectors table (agrees). Encoder emits uppercase. Announcement fields come from the test's fixture object (flags/summary as ints); the UUID is the literal."
+    },
+    {
+      "id": "compact-discovery-005",
+      "description": "Call offer with the relay-consent bit (call-offer bit 18, R11 amendment) carried as capabilitySummary bit 4",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 135,
+        "method": "carriesTheRelayConsentBitOfCallOffers"
+      },
+      "inputs": {
+        "uuid": "C8D64010-2030-4050-60C0-000000040000"
+      },
+      "expected": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 19,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Also in docs/PROTOCOL.md 'Compact (iPhone) call-offer amendment (R11)' (agrees). capabilitySummary 0x13 = VP9|AV1|consent(0x10); call readers test only codec bits (summary & 7 == 3)."
+    },
+    {
+      "id": "compact-discovery-006",
+      "description": "Compact v2 (rotating ID) call offer: role-0 RDI 44e69c0a7a7d, LE CoC, VP9+AV1, cost 0 -> version 5 announcement",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 140,
+        "method": "compactV2MatchesTheReviewedVectorAndIsRejectedWhenOff"
+      },
+      "inputs": {
+        "uuid": "C8D6844E-69C0-A7A7-D0C0-000000000000",
+        "accept_rotating": true
+      },
+      "expected": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "44e69c0a7a7d",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Version bits (111..110) = 2 maps to announcement version 5. Same UUID in docs/PROTOCOL.md rotating-ID vector table (agrees)."
+    },
+    {
+      "id": "compact-discovery-007",
+      "description": "Compact v2 UUID is rejected when rotating IDs are off (acceptRotating=false)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 146,
+        "method": "compactV2MatchesTheReviewedVectorAndIsRejectedWhenOff"
+      },
+      "inputs": {
+        "uuid": "C8D6844E-69C0-A7A7-D0C0-000000000000",
+        "accept_rotating": false
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "rotating compact version not accepted (IllegalArgumentException)"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-008",
+      "description": "Compact v1 UUID still decodes as a fixed-prefix (version 2) announcement even with acceptRotating=true",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 150,
+        "method": "compactV2MatchesTheReviewedVectorAndIsRejectedWhenOff"
+      },
+      "inputs": {
+        "uuid": "C8D64010-2030-4050-60C0-000000000000",
+        "accept_rotating": true
+      },
+      "expected": {
+        "version": 2,
+        "rotating": false,
+        "node_id_prefix": "010203040506"
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-009",
+      "description": "Wrong magic C8D7 (instead of C8D6) is rejected",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 117,
+        "method": "rejectsEverythingAnEncoderNeverEmits"
+      },
+      "inputs": {
+        "uuid": "C8D74010-2030-4050-60C0-000000000000"
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "magic"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-010",
+      "description": "Version field 0, 2 or 3 (bits 111..110; only 1 is valid in the non-rotating decoder) is rejected on the call-offer vector",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "rejectsEverythingAnEncoderNeverEmits",
+        "line": 113
+      },
+      "inputs": {
+        "cases": [
+          {
+            "version_field": 0,
+            "uuid": "C8D60010-2030-4050-60C0-000000000000"
+          },
+          {
+            "version_field": 2,
+            "uuid": "C8D68010-2030-4050-60C0-000000000000"
+          },
+          {
+            "version_field": 3,
+            "uuid": "C8D6C010-2030-4050-60C0-000000000000"
+          }
+        ]
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "reject",
+      "notes": "Test asserts rejection for versions 0,2,3 via withVersion(call, v) with acceptRotating=false (version 2 is accepted only with acceptRotating=true)."
+    },
+    {
+      "id": "compact-discovery-011",
+      "description": "Kind 3 (bits 109..108) is rejected",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "rejectsEverythingAnEncoderNeverEmits",
+        "line": 113
+      },
+      "inputs": {
+        "cases": [
+          {
+            "uuid": "C8D67010-2030-4050-60C0-000000000000"
+          }
+        ]
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "reject",
+      "notes": "withKind(call, 3)."
+    },
+    {
+      "id": "compact-discovery-012",
+      "description": "Stream-paused bit (bit 57) outside a stream offer is rejected (paused call offer, paused viewer request)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "rejectsEverythingAnEncoderNeverEmits",
+        "line": 113
+      },
+      "inputs": {
+        "cases": [
+          {
+            "base": "call offer",
+            "uuid": "C8D64010-2030-4050-62C0-000000000000"
+          },
+          {
+            "base": "viewer request",
+            "uuid": "C8D65010-2030-4050-62C0-D5E6F780C000"
+          }
+        ]
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "reject",
+      "notes": "flipLsb(call, 57) and flipLsb(viewer, 57); bit 57 is the 'stream paused' flag (stream offers only)."
+    },
+    {
+      "id": "compact-discovery-013",
+      "description": "Call offer with any reserved bit 0..17 or 19..49 set (call offers carry no token and no stream fields) is rejected; bit 18 is the relay-consent bit and is accepted (separate vector)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "rejectsEverythingAnEncoderNeverEmits",
+        "line": 113
+      },
+      "inputs": {
+        "cases": [
+          {
+            "bit": 0,
+            "uuid": "C8D64010-2030-4050-60C0-000000000001"
+          },
+          {
+            "bit": 1,
+            "uuid": "C8D64010-2030-4050-60C0-000000000002"
+          },
+          {
+            "bit": 2,
+            "uuid": "C8D64010-2030-4050-60C0-000000000004"
+          },
+          {
+            "bit": 3,
+            "uuid": "C8D64010-2030-4050-60C0-000000000008"
+          },
+          {
+            "bit": 4,
+            "uuid": "C8D64010-2030-4050-60C0-000000000010"
+          },
+          {
+            "bit": 5,
+            "uuid": "C8D64010-2030-4050-60C0-000000000020"
+          },
+          {
+            "bit": 6,
+            "uuid": "C8D64010-2030-4050-60C0-000000000040"
+          },
+          {
+            "bit": 7,
+            "uuid": "C8D64010-2030-4050-60C0-000000000080"
+          },
+          {
+            "bit": 8,
+            "uuid": "C8D64010-2030-4050-60C0-000000000100"
+          },
+          {
+            "bit": 9,
+            "uuid": "C8D64010-2030-4050-60C0-000000000200"
+          },
+          {
+            "bit": 10,
+            "uuid": "C8D64010-2030-4050-60C0-000000000400"
+          },
+          {
+            "bit": 11,
+            "uuid": "C8D64010-2030-4050-60C0-000000000800"
+          },
+          {
+            "bit": 12,
+            "uuid": "C8D64010-2030-4050-60C0-000000001000"
+          },
+          {
+            "bit": 13,
+            "uuid": "C8D64010-2030-4050-60C0-000000002000"
+          },
+          {
+            "bit": 14,
+            "uuid": "C8D64010-2030-4050-60C0-000000004000"
+          },
+          {
+            "bit": 15,
+            "uuid": "C8D64010-2030-4050-60C0-000000008000"
+          },
+          {
+            "bit": 16,
+            "uuid": "C8D64010-2030-4050-60C0-000000010000"
+          },
+          {
+            "bit": 17,
+            "uuid": "C8D64010-2030-4050-60C0-000000020000"
+          },
+          {
+            "bit": 19,
+            "uuid": "C8D64010-2030-4050-60C0-000000080000"
+          },
+          {
+            "bit": 20,
+            "uuid": "C8D64010-2030-4050-60C0-000000100000"
+          },
+          {
+            "bit": 21,
+            "uuid": "C8D64010-2030-4050-60C0-000000200000"
+          },
+          {
+            "bit": 22,
+            "uuid": "C8D64010-2030-4050-60C0-000000400000"
+          },
+          {
+            "bit": 23,
+            "uuid": "C8D64010-2030-4050-60C0-000000800000"
+          },
+          {
+            "bit": 24,
+            "uuid": "C8D64010-2030-4050-60C0-000001000000"
+          },
+          {
+            "bit": 25,
+            "uuid": "C8D64010-2030-4050-60C0-000002000000"
+          },
+          {
+            "bit": 26,
+            "uuid": "C8D64010-2030-4050-60C0-000004000000"
+          },
+          {
+            "bit": 27,
+            "uuid": "C8D64010-2030-4050-60C0-000008000000"
+          },
+          {
+            "bit": 28,
+            "uuid": "C8D64010-2030-4050-60C0-000010000000"
+          },
+          {
+            "bit": 29,
+            "uuid": "C8D64010-2030-4050-60C0-000020000000"
+          },
+          {
+            "bit": 30,
+            "uuid": "C8D64010-2030-4050-60C0-000040000000"
+          },
+          {
+            "bit": 31,
+            "uuid": "C8D64010-2030-4050-60C0-000080000000"
+          },
+          {
+            "bit": 32,
+            "uuid": "C8D64010-2030-4050-60C0-000100000000"
+          },
+          {
+            "bit": 33,
+            "uuid": "C8D64010-2030-4050-60C0-000200000000"
+          },
+          {
+            "bit": 34,
+            "uuid": "C8D64010-2030-4050-60C0-000400000000"
+          },
+          {
+            "bit": 35,
+            "uuid": "C8D64010-2030-4050-60C0-000800000000"
+          },
+          {
+            "bit": 36,
+            "uuid": "C8D64010-2030-4050-60C0-001000000000"
+          },
+          {
+            "bit": 37,
+            "uuid": "C8D64010-2030-4050-60C0-002000000000"
+          },
+          {
+            "bit": 38,
+            "uuid": "C8D64010-2030-4050-60C0-004000000000"
+          },
+          {
+            "bit": 39,
+            "uuid": "C8D64010-2030-4050-60C0-008000000000"
+          },
+          {
+            "bit": 40,
+            "uuid": "C8D64010-2030-4050-60C0-010000000000"
+          },
+          {
+            "bit": 41,
+            "uuid": "C8D64010-2030-4050-60C0-020000000000"
+          },
+          {
+            "bit": 42,
+            "uuid": "C8D64010-2030-4050-60C0-040000000000"
+          },
+          {
+            "bit": 43,
+            "uuid": "C8D64010-2030-4050-60C0-080000000000"
+          },
+          {
+            "bit": 44,
+            "uuid": "C8D64010-2030-4050-60C0-100000000000"
+          },
+          {
+            "bit": 45,
+            "uuid": "C8D64010-2030-4050-60C0-200000000000"
+          },
+          {
+            "bit": 46,
+            "uuid": "C8D64010-2030-4050-60C0-400000000000"
+          },
+          {
+            "bit": 47,
+            "uuid": "C8D64010-2030-4050-60C0-800000000000"
+          },
+          {
+            "bit": 48,
+            "uuid": "C8D64010-2030-4050-60C1-000000000000"
+          },
+          {
+            "bit": 49,
+            "uuid": "C8D64010-2030-4050-60C2-000000000000"
+          }
+        ]
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "reject",
+      "notes": "R11: every call-offer bit 49..19 and 17..0 still rejects."
+    },
+    {
+      "id": "compact-discovery-014",
+      "description": "Viewer request with any of the reserved low bits 0..11 set is rejected",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "rejectsEverythingAnEncoderNeverEmits",
+        "line": 113
+      },
+      "inputs": {
+        "cases": [
+          {
+            "bit": 0,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C001"
+          },
+          {
+            "bit": 1,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C002"
+          },
+          {
+            "bit": 2,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C004"
+          },
+          {
+            "bit": 3,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C008"
+          },
+          {
+            "bit": 4,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C010"
+          },
+          {
+            "bit": 5,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C020"
+          },
+          {
+            "bit": 6,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C040"
+          },
+          {
+            "bit": 7,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C080"
+          },
+          {
+            "bit": 8,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C100"
+          },
+          {
+            "bit": 9,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C200"
+          },
+          {
+            "bit": 10,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C400"
+          },
+          {
+            "bit": 11,
+            "uuid": "C8D65010-2030-4050-60C0-D5E6F780C800"
+          }
+        ]
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "reject",
+      "notes": "Viewer request bits 18..12 are the bitrate in 25 kbps units; 11..0 must be zero."
+    },
+    {
+      "id": "compact-discovery-015",
+      "description": "Stream offer: every one of the 19 kind-specific bits 0..18 flipped still decodes (all values defined)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "rejectsEverythingAnEncoderNeverEmits",
+        "line": 113
+      },
+      "inputs": {
+        "cases": [
+          {
+            "bit": 0,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A0D"
+          },
+          {
+            "bit": 1,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A0E"
+          },
+          {
+            "bit": 2,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A08"
+          },
+          {
+            "bit": 3,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A04"
+          },
+          {
+            "bit": 4,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A1C"
+          },
+          {
+            "bit": 5,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A2C"
+          },
+          {
+            "bit": 6,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A4C"
+          },
+          {
+            "bit": 7,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A8C"
+          },
+          {
+            "bit": 8,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2B0C"
+          },
+          {
+            "bit": 9,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C280C"
+          },
+          {
+            "bit": 10,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2E0C"
+          },
+          {
+            "bit": 11,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C220C"
+          },
+          {
+            "bit": 12,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C3A0C"
+          },
+          {
+            "bit": 13,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C0A0C"
+          },
+          {
+            "bit": 14,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C6A0C"
+          },
+          {
+            "bit": 15,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77CAA0C"
+          },
+          {
+            "bit": 16,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77D2A0C"
+          },
+          {
+            "bit": 17,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77E2A0C"
+          },
+          {
+            "bit": 18,
+            "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF7782A0C"
+          }
+        ]
+      },
+      "expected": {
+        "rejected": false,
+        "decodes": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "decode",
+      "notes": "Decodes without throwing; field values are not asserted by the test."
+    },
+    {
+      "id": "compact-discovery-016",
+      "description": "Reserved H.264 codec bit (bit 56) set on the stream offer decodes to capabilitySummary VP9 | 0x04 (carried, not rejected)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "carriesTheReservedH264CodecBitInsteadOfRejecting",
+        "line": 143
+      },
+      "inputs": {
+        "cases": [
+          {
+            "uuid": "C8D66A1B-2C3D-4E5F-6F46-F56DF77C2A0C"
+          }
+        ]
+      },
+      "expected": {
+        "capability_summary": 5,
+        "av1_bit": 0
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: flip/replace the stated bits of the literal UUID (UUID read as a 128-bit BE integer U); the outcome is the test's assertion",
+      "kind": "decode",
+      "notes": "Expected summary 5 and AV1 bit 0 are the test's literal assertions."
+    },
+    {
+      "id": "compact-discovery-017",
+      "description": "Reference compact encoder refuses: Classic transport flag (not representable)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 81,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-018",
+      "description": "Reference compact encoder refuses: Route recovery (flag 0x80 + recovery prefix a1b2c3d4e5f6) on a viewer request",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 129,
+          "capability_summary": 3,
+          "stream_token_hex": "9abcdef0",
+          "route_cost": 0,
+          "recovery_from_node_id_prefix": "a1b2c3d4e5f6",
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-019",
+      "description": "Reference compact encoder refuses: Route cost 16 (max 15)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 16,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-020",
+      "description": "Reference compact encoder refuses: Call offer carrying a stream token (7)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 3,
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0,
+          "stream_token_u32": 7
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-021",
+      "description": "Reference compact encoder refuses: Viewer request without a route token (0)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 1,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-022",
+      "description": "Reference compact encoder refuses: Viewer request with token 0x1234 (bit 31 clear)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 1,
+          "capability_summary": 3,
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 300,
+          "stream_token_u32": 4660
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-023",
+      "description": "Reference compact encoder refuses: Viewer request with the stream-paused flag",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 33,
+          "capability_summary": 3,
+          "stream_token_hex": "9abcdef0",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-024",
+      "description": "Reference compact encoder refuses: Stream offer with capabilitySummary 1<<3 (the dual-listening hint bit, not representable)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 166,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "a1b2c3d4e5f6",
+          "flags": 46,
+          "capability_summary": 8,
+          "stream_token_hex": "deadbeef",
+          "route_cost": 1,
+          "sequence": 133,
+          "stream_width": 640,
+          "stream_height": 360,
+          "stream_fps": 15,
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Encoder side only (what a sender must never emit). Fields reconstructed from the test's callOffer/viewerRequest/streamOffer fixtures with the stated change."
+    },
+    {
+      "id": "compact-discovery-025",
+      "description": "Bitrate 310 kbps on a viewer request quantises to 300 on decode(encode()); 5000 kbps on a stream offer saturates to 3175",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 186,
+        "method": "referenceEncoderRefusesWhatItCannotRepresent"
+      },
+      "inputs": {
+        "cases": [
+          {
+            "base": "viewer request",
+            "stream_bitrate_kbps": 310
+          },
+          {
+            "base": "stream offer",
+            "stream_bitrate_kbps": 5000
+          }
+        ]
+      },
+      "expected": {
+        "decoded_stream_bitrate_kbps": [
+          300,
+          3175
+        ]
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "25 kbps unit, 7-bit field for stream offers (max 127*25 = 3175)."
+    },
+    {
+      "id": "compact-discovery-026",
+      "description": "Stream offer with 1280x720, 60 FPS, bitrate 0 (geometry/FPS not in the compact tables) decodes with width, height, fps and bitrate all 0",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 151,
+        "method": "unspecifiedGeometryAndFrameRateDecodeAsZero"
+      },
+      "inputs": {
+        "base": "stream offer",
+        "stream_width": 1280,
+        "stream_height": 720,
+        "stream_fps": 60,
+        "stream_bitrate_kbps": 0
+      },
+      "expected": {
+        "stream_width": 0,
+        "stream_height": 0,
+        "stream_fps": 0,
+        "stream_bitrate_kbps": 0
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Compact tables: resolutions 426x240, 640x360, 854x480 (index 3 = unspecified); FPS 15, 24, 30 (index 3 = unspecified)."
+    },
+    {
+      "id": "compact-discovery-027",
+      "description": "Stream offer sequence 0x85 decodes as full-stream offer with capacity generation 5",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 90,
+        "method": "decodedAnnouncementsDriveTheExistingConsumers"
+      },
+      "inputs": {
+        "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A0C"
+      },
+      "expected": {
+        "is_stream_offer": true,
+        "is_full_stream_offer": true,
+        "capacity_generation": 5
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "sequence top bit 0x80 = SEQUENCE_SOURCE_FULL, low bits = capacity generation."
+    },
+    {
+      "id": "compact-discovery-028",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) matches C8D64010-2030-4050-60C0-000000000000",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "C8D64010-2030-4050-60C0-000000000000"
+      },
+      "expected": {
+        "matches": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-029",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) matches C8D64A1B-2C3D-4E5F-6848-000000000000",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "C8D64A1B-2C3D-4E5F-6848-000000000000"
+      },
+      "expected": {
+        "matches": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-030",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) matches C8D65010-2030-4050-60C0-D5E6F780C000",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "C8D65010-2030-4050-60C0-D5E6F780C000"
+      },
+      "expected": {
+        "matches": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-031",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) matches C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A0C",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "C8D66A1B-2C3D-4E5F-6E46-F56DF77C2A0C"
+      },
+      "expected": {
+        "matches": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-032",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) matches c8d6ffff-ffff-ffff-ffff-ffffffffffff",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "c8d6ffff-ffff-ffff-ffff-ffffffffffff"
+      },
+      "expected": {
+        "matches": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-033",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) does not match c8d5a101-9f88-4f65-a03d-7f5a2fb921fa",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "c8d5a101-9f88-4f65-a03d-7f5a2fb921fa"
+      },
+      "expected": {
+        "matches": false
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-034",
+      "description": "Masked scan filter (filter C8D60000-0000-0000-0000-000000000000, mask FFFF0000-0000-0000-0000-000000000000) does not match 0000180f-0000-1000-8000-00805f9b34fb",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "method": "maskedFilterMatchesOnlyTheMagic",
+        "line": 190
+      },
+      "inputs": {
+        "filter_uuid": "C8D60000-0000-0000-0000-000000000000",
+        "filter_mask": "FFFF0000-0000-0000-0000-000000000000",
+        "uuid": "0000180f-0000-1000-8000-00805f9b34fb"
+      },
+      "expected": {
+        "matches": false
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: (filter & mask) == (uuid & mask) over the 128-bit integers; the expected outcome is the test's literal assertTrue/assertFalse. c8d5a101-... is BleL2capControlProtocol.SERVICE_UUID.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "compact-discovery-035",
+      "description": "firstCandidate picks the first service UUID whose top 16 bits are 0xC8D6 (skips the battery UUID and the app service UUID)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 202,
+        "method": "firstCandidateSkipsTheAppServiceAndShortUuids"
+      },
+      "inputs": {
+        "service_uuids": [
+          "0000180f-0000-1000-8000-00805f9b34fb",
+          "c8d5a101-9f88-4f65-a03d-7f5a2fb921fa",
+          "C8D65010-2030-4050-60C0-D5E6F780C000",
+          "C8D64010-2030-4050-60C0-000000000000"
+        ]
+      },
+      "expected": {
+        "first_candidate": "C8D65010-2030-4050-60C0-D5E6F780C000"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Also: a list with only the battery UUID and the app service UUID, and a null list, give no candidate."
+    },
+    {
+      "id": "compact-discovery-036",
+      "description": "Scan failure 4 (FEATURE_UNSUPPORTED): masked filter dropped",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 17,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 4
+      },
+      "expected": {
+        "refuses_filter": true
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    },
+    {
+      "id": "compact-discovery-037",
+      "description": "Scan failure 5 (OUT_OF_HARDWARE_RESOURCES): masked filter dropped",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 18,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 5
+      },
+      "expected": {
+        "refuses_filter": true
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    },
+    {
+      "id": "compact-discovery-038",
+      "description": "Scan failure 1 (ALREADY_STARTED): masked filter kept",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 20,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 1
+      },
+      "expected": {
+        "refuses_filter": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    },
+    {
+      "id": "compact-discovery-039",
+      "description": "Scan failure 2 (APPLICATION_REGISTRATION_FAILED): masked filter kept",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 21,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 2
+      },
+      "expected": {
+        "refuses_filter": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    },
+    {
+      "id": "compact-discovery-040",
+      "description": "Scan failure 3 (INTERNAL_ERROR): masked filter kept",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 22,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 3
+      },
+      "expected": {
+        "refuses_filter": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    },
+    {
+      "id": "compact-discovery-041",
+      "description": "Scan failure 6 (SCANNING_TOO_FREQUENTLY): masked filter kept",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 23,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 6
+      },
+      "expected": {
+        "refuses_filter": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    },
+    {
+      "id": "compact-discovery-042",
+      "description": "Scan failure 99 (unknown): masked filter kept",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactFilterGuardTest.kt",
+        "class": "CompactFilterGuardTest",
+        "line": 24,
+        "method": "onlyFilterRelatedScanFailuresDropTheMaskedFilter"
+      },
+      "inputs": {
+        "scan_error_code": 99
+      },
+      "expected": {
+        "refuses_filter": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "AOSP ScanCallback error codes 1..6; local scanner policy, not wire."
+    }
+  ],
+  "description": "iPhone compact discovery announcement: one 128-bit service UUID (PROTOCOL 'Experimental iPhone compact discovery'). Layout of U (128-bit BE integer of the canonical UUID string): 127..112 magic 0xC8D6; 111..110 version (1 = fixed prefix, 2 = rotating ID); 109..108 kind (0 call offer, 1 viewer request, 2 stream offer, 3 rejected); 107..60 node prefix; 59 GATT, 58 relay capable, 57 paused (stream offers only); 56..54 codec mask (54 VP9, 55 AV1, 56 reserved H.264); 53..50 route cost; 49..19 route token bits 30..0 (bit 31 implied); 18..0 kind-specific. announcement flags: 0x01 accepting connections, 0x02 relay capable, 0x04 stream available, 0x08 GATT transport, 0x10 Classic transport, 0x20 stream paused, 0x40 private call available, 0x80 route recovery. capabilitySummary: bit0 VP9, bit1 AV1, bit2 reserved H.264, bit3 dual-listening hint, bit4 relayed-call consent. Integers named *_hex are big-endian lowercase hex."
+}

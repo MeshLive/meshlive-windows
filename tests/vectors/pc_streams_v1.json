@@ -1,0 +1,125 @@
+{
+  "uuid": "c8d5a10a-9f88-4f65-a03d-7f5a2fb921fa",
+  "vectors": [
+    {
+      "name": "viewer request",
+      "hex": "110505050505050509008000004200000000000000012c",
+      "kind": 1,
+      "inner": "0505050505050509008000004200000000000000012c"
+    },
+    {
+      "name": "recovery request",
+      "hex": "110505050505050589008000004200090909090909012c",
+      "kind": 1,
+      "inner": "0505050505050589008000004200090909090909012c"
+    },
+    {
+      "name": "video source",
+      "hex": "12050707070707070c01800000420001028001680f012c",
+      "kind": 2,
+      "inner": "050707070707070c01800000420001028001680f012c"
+    },
+    {
+      "name": "paused source",
+      "hex": "12050707070707072c01800000420001028001680f012c",
+      "kind": 2,
+      "inner": "050707070707072c01800000420001028001680f012c"
+    },
+    {
+      "name": "audio source",
+      "hex": "12050707070707070c408000004200010000000000012c",
+      "kind": 2,
+      "inner": "050707070707070c408000004200010000000000012c"
+    },
+    {
+      "name": "unchanged call offer",
+      "hex": "100101010101010103",
+      "kind": 0
+    },
+    {
+      "name": "offer in request",
+      "hex": "11050707070707070c01800000420001028001680f012c",
+      "error": "Fields"
+    },
+    {
+      "name": "request in offer",
+      "hex": "120505050505050509008000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "call flags in offer",
+      "hex": "12050707070707074901800000420001028001680f012c",
+      "error": "Fields"
+    },
+    {
+      "name": "fixed inner version",
+      "hex": "110205050505050509008000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "window inner version",
+      "hex": "110805050505050509008000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "request codec summary",
+      "hex": "110505050505050509018000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "offer reserved summary",
+      "hex": "12050707070707070c08800000420001028001680f012c",
+      "error": "Fields"
+    },
+    {
+      "name": "relay source",
+      "hex": "12050707070707070e01800000420001028001680f012c",
+      "error": "Fields"
+    },
+    {
+      "name": "nonzero source cost",
+      "hex": "12050707070707070c01800000420101028001680f012c",
+      "error": "Fields"
+    },
+    {
+      "name": "missing request GATT",
+      "hex": "110505050505050501008000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "unmasked token",
+      "hex": "110505050505050509000000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "empty recovery hint",
+      "hex": "110505050505050589008000004200000000000000012c",
+      "error": "Fields"
+    },
+    {
+      "name": "empty",
+      "hex": "",
+      "error": "Length"
+    },
+    {
+      "name": "version before length",
+      "hex": "20",
+      "error": "Version"
+    },
+    {
+      "name": "kind before length",
+      "hex": "1f",
+      "error": "Kind"
+    },
+    {
+      "name": "short request",
+      "hex": "11050505050505050900800000420000000000000001",
+      "error": "Length"
+    },
+    {
+      "name": "long offer",
+      "hex": "12050707070707070c01800000420001028001680f012c00",
+      "error": "Length"
+    }
+  ]
+}

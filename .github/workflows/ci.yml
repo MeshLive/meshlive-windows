@@ -1,0 +1,56 @@
+# Offline checks only: the pinned native codecs, a release build and every unit and integration test on a
+# Windows runner. Nothing here touches Bluetooth, a camera, a microphone or a phone, and D3D11 tests use the WARP
+# software device, so a green run is not evidence that calls or streams work between devices
+# (docs/dev/testing.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (x64)
+    # Needs the Windows SDK 10.0.26100 (fxc.exe), Visual Studio Build Tools, Git for Windows and Python.
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      # The native source archives and build tools are verified by SHA-256 on every run; the cache only saves
+      # downloading them again. The crate registry is cached the same way (Cargo.lock pins every version).
+      - name: Restore downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/native-downloads
+            .cache/cargo/registry
+          key: downloads-${{ runner.os }}-${{ hashFiles('sources.lock.json', 'Cargo.lock') }}
+
+      - name: Show tool versions
+        shell: pwsh
+        run: |
+          rustc --version
+          cargo --version
+          python --version
+          Test-Path 'C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/fxc.exe'
+
+      - name: Frozen sources and fixtures
+        shell: pwsh
+        run: python -B scripts/check_sources.py
+
+      - name: Build the native codecs and the app, run all tests (release)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1 -Action Test -Configuration Release

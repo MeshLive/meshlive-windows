@@ -1,0 +1,6 @@
+{
+  "comment": "Placeholder package identity until the Microsoft Store name is reserved in Partner Center. Replace name and publisher with the values Partner Center shows (Product identity). Never put a personal name here.",
+  "name": "MeshLive.Placeholder",
+  "publisher": "CN=MeshLive Placeholder",
+  "publisherDisplayName": "MeshLive"
+}

@@ -1,0 +1,46 @@
+[package]
+name = "meshlive"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+authors = ["The MeshLive Authors"]
+publish = false
+
+[dependencies]
+subtle = { version = "=2.6.1", default-features = false }
+zeroize = "=1.8.2"
+png = "=0.18.0"
+# QR codes from the webcam in Add contact (src/qr_scan.rs); (MIT OR Apache-2.0) AND ISC (quirc port).
+rqrr = { version = "=0.11.0", default-features = false }
+egui = { version = "=0.33.3", default-features = false, features = ["accesskit"] }
+egui-winit = { version = "=0.33.3", default-features = false, features = ["accesskit"] }
+egui-directx11 = { path = "vendor/egui-directx11" }
+winit = { version = "=0.30.12", default-features = false, features = ["rwh_06"] }
+windows = { version = "=0.62.2", features = [
+    "Devices_Bluetooth", "Devices_Enumeration", "Devices_Radios", "Foundation",
+    "Devices_Bluetooth_Advertisement", "Devices_Bluetooth_GenericAttributeProfile", "Storage_Streams",
+    "Win32_Security_Cryptography", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_Threading", "Win32_System_Power", "Win32_System_StationsAndDesktops", "Win32_System_SystemInformation", "Win32_Media_Audio_Endpoints", "Win32_Devices_FunctionDiscovery", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Registry",
+    "Win32_System_ProcessStatus", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_Memory", "Win32_Storage_FileSystem", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging",
+    "Win32_System_WinRT", "UI_Notifications", "Data_Xml_Dom", "ApplicationModel", "ApplicationModel_Activation", "Win32_Graphics_Gdi",
+    "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Ole",
+] }
+windows-future = "=0.3.2"
+# The `implement` macro (COM callbacks such as IMMNotificationClient) names it directly.
+windows-core = "=0.62.2"
+
+[dev-dependencies]
+serde_json = "=1.0.145"
+
+[features]
+# Test-only: unattended app calls for phone runs (src/ui/test_hooks.rs).
+# Never part of the release app; build a separate binary with it.
+test-hooks = []
+
+[profile.release]
+opt-level = 3
+strip = "symbols"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

@@ -1,0 +1,1773 @@
+{
+  "schema": "meshlive-conformance-vectors/1",
+  "area": "announcements",
+  "android_commit": "bca3031f8dae52bc149eb55e84f3f3f18f47a623",
+  "vectors": [
+    {
+      "id": "announcements-001",
+      "description": "Version 2 call offer, prefix 010203040506, flags 0x41, VP9+AV1, cost 0 (today)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 42,
+        "method": "vectorsMatchProtocol"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "bytes": "02010203040506410300000000000000000000000000"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also docs/PROTOCOL.md 'Experimental dual listening' Vectors table, line 870 (agrees)."
+    },
+    {
+      "id": "announcements-002",
+      "description": "Same with the dual-listening hint (capabilitySummary 0x0b)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 43,
+        "method": "vectorsMatchProtocol"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 11,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "bytes": "02010203040506410b00000000000000000000000000"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also docs/PROTOCOL.md 'Experimental dual listening' Vectors table, line 871 (agrees)."
+    },
+    {
+      "id": "announcements-003",
+      "description": "GATT-primary call offer (flags 0x49), no hint",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 48,
+        "method": "vectorsMatchProtocol"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 73,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "bytes": "02010203040506490300000000000000000000000000"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also docs/PROTOCOL.md 'Experimental dual listening' Vectors table, line 872 (agrees)."
+    },
+    {
+      "id": "announcements-004",
+      "description": "Version 5 call offer, role-0 RDI 44e69c0a7a7d, flags 0x41, VP9+AV1+dual hint",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 54,
+        "method": "vectorsMatchProtocol"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "44e69c0a7a7d",
+          "flags": 65,
+          "capability_summary": 11,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "bytes": "0544e69c0a7a7d410b00000000000000000000000000"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also docs/PROTOCOL.md 'Experimental dual listening' Vectors table, line 873 (agrees)."
+    },
+    {
+      "id": "announcements-005",
+      "description": "Hinted offer differs from the plain offer in exactly one byte (offset 8, capabilitySummary |= 0x08); length stays 22",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 63,
+        "method": "hintedOfferDiffersFromTheOldOfferInExactlyOneByte"
+      },
+      "inputs": {
+        "plain": "02010203040506410300000000000000000000000000",
+        "hinted": "02010203040506410b00000000000000000000000000"
+      },
+      "expected": {
+        "differing_offsets": [
+          8
+        ],
+        "summary_bit": 8
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "announcements-006",
+      "description": "Decoder accepts the hinted version-2 offer with summary 0x0b and every other field unchanged",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 76,
+        "method": "theCurrentDecoderIgnoresTheBitAndEveryOtherFieldIsUnchanged"
+      },
+      "inputs": {
+        "bytes": "02010203040506410b00000000000000000000000000"
+      },
+      "expected": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 11,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Fields reconstructed from the test's fixture (decoded plain vs decoded hinted)."
+    },
+    {
+      "id": "announcements-007",
+      "description": "Version 5 hinted offer decodes only with acceptRotating=true; with acceptRotating=false decode throws",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 90,
+        "method": "theCurrentDecoderIgnoresTheBitAndEveryOtherFieldIsUnchanged"
+      },
+      "inputs": {
+        "bytes": "0544e69c0a7a7d410b00000000000000000000000000",
+        "accept_rotating": false
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "The message text is asserted in RotatingDiscoveryTest.version5IsRejectedWithTheSwitchOffAndVersion2IsUnchanged."
+    },
+    {
+      "id": "announcements-008",
+      "description": "Dual-listening hint may be carried on: CoC call offer",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 144,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": true,
+        "offer_gets_summary_bit_3": true
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "announcements-009",
+      "description": "Dual-listening hint may be carried on: CoC call offer, v5",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 145,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "44e69c0a7a7d",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": true,
+        "offer_gets_summary_bit_3": true
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "announcements-010",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: GATT-primary",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 152,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 73,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-011",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: Classic",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 153,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 81,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-012",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: relayed (cost 1)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 154,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 67,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 1,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-013",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: cost 1 without helper flag",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 155,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 1,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-014",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: relay helper",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 156,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 67,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-015",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: stream offer",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 157,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 68,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-016",
+      "description": "Dual-listening hint is never carried (and a forged bit is ignored) on: viewer request",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 158,
+        "method": "onlyACostZeroCoCCallOfferCarriesOrHonorsTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 1,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        },
+        "switch_on": true,
+        "second_listener_ready": true
+      },
+      "expected": {
+        "may_carry": false,
+        "offer_unchanged": true,
+        "forged_bit_honored": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Flags value reconstructed from the test's callFlags (0x41) plus the stated flag(s); stream-offer shape is FLAG_STREAM_AVAILABLE|FLAG_PRIVATE_CALL_AVAILABLE (0x44), viewer request is FLAG_ACCEPTING_CONNECTIONS (0x01)."
+    },
+    {
+      "id": "announcements-017",
+      "description": "Compact (iPhone) encoder refuses a hinted offer and the compact decoder never produces summary bit 3",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/DualListeningWireTest.kt",
+        "class": "DualListeningWireTest",
+        "line": 132,
+        "method": "theCompactFormNeverCarriesTheBit"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 2,
+          "node_id_prefix": "010203040506",
+          "flags": 65,
+          "capability_summary": 11,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "compact_encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-018",
+      "description": "Version 5 call offer, role-0 RDI 44e69c0a7a7d, flags 0x41, VP9+AV1, token 0, cost 0",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 77,
+        "method": "announcementVersion5MatchesTheReviewedVectors"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "44e69c0a7a7d",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "00000000",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected": {
+        "bytes": "0544e69c0a7a7d410300000000000000000000000000"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also docs/PROTOCOL.md rotating-ID vector table (agrees)."
+    },
+    {
+      "id": "announcements-019",
+      "description": "Version 5 stream offer, role-1 RDI bb2d061f6480, flags 0x0c, VP9, route token 0x92529fc4 (logical 0x12345678), cost 0, sequence 1, 640x360, 15 FPS, 300 kbps",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 97,
+        "method": "announcementVersion5MatchesTheReviewedVectors"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "bb2d061f6480",
+          "flags": 12,
+          "capability_summary": 1,
+          "stream_token_hex": "92529fc4",
+          "route_cost": 0,
+          "sequence": 1,
+          "stream_width": 640,
+          "stream_height": 360,
+          "stream_fps": 15,
+          "stream_bitrate_kbps": 300
+        },
+        "logical_stream_token_hex": "12345678"
+      },
+      "expected": {
+        "bytes": "05bb2d061f64800c0192529fc40001028001680f012c"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also in RotatingStreamsTest.streamOfferMatchesTheReviewedVector and docs/PROTOCOL.md (agrees). Decoding with acceptRotating=true gives rotating=true and logical token 0x12345678 = routeToken xor advertiser mask."
+    },
+    {
+      "id": "announcements-020",
+      "description": "Version 5 viewer request, role-2 RDI 974ae410ea91, flags 0x09 (accepting + GATT), no codec summary (capabilitySummary 0), token 0x92529fc4, cost 0, 300 kbps",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingStreamsTest.kt",
+        "class": "RotatingStreamsTest",
+        "line": 124,
+        "method": "viewerRequestMatchesTheReviewedVectorsWithAndWithoutTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "974ae410ea91",
+          "flags": 9,
+          "capability_summary": 0,
+          "stream_token_hex": "92529fc4",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected": {
+        "bytes": "05974ae410ea91090092529fc400000000000000012c"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Also docs/PROTOCOL.md line 547 (agrees)."
+    },
+    {
+      "id": "announcements-021",
+      "description": "Same viewer request with FLAG_ROUTE_RECOVERY (0x89) and the 6-byte recovery hint 4d832e9d4dc7 in the bytes normally holding sequence/size/fps",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingStreamsTest.kt",
+        "class": "RotatingStreamsTest",
+        "line": 128,
+        "method": "viewerRequestMatchesTheReviewedVectorsWithAndWithoutTheHint"
+      },
+      "inputs": {
+        "announcement": {
+          "version": 5,
+          "node_id_prefix": "974ae410ea91",
+          "flags": 137,
+          "capability_summary": 0,
+          "stream_token_hex": "92529fc4",
+          "route_cost": 0,
+          "recovery_from_node_id_prefix": "4d832e9d4dc7",
+          "stream_bitrate_kbps": 300
+        }
+      },
+      "expected": {
+        "bytes": "05974ae410ea91890092529fc4004d832e9d4dc7012c"
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Decoder reads it back as version 5 with recoveryFromNodeIdPrefix = the hint (flags & 0x80). Also docs/PROTOCOL.md line 548 (agrees). The hint derivation is in rotating-ids.json."
+    },
+    {
+      "id": "announcements-022",
+      "description": "Version 5 announcement is rejected with rotating IDs off (acceptRotating=false), reason 'Unsupported announcement version'",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 111,
+        "method": "version5IsRejectedWithTheSwitchOffAndVersion2IsUnchanged"
+      },
+      "inputs": {
+        "bytes": "0544e69c0a7a7d410300000000000000000000000000",
+        "accept_rotating": false
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-023",
+      "description": "The same bytes with version byte 2 decode as a fixed-prefix announcement (rotating=false) and re-encode byte for byte",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 116,
+        "method": "version5IsRejectedWithTheSwitchOffAndVersion2IsUnchanged"
+      },
+      "inputs": {
+        "bytes": "0244e69c0a7a7d410300000000000000000000000000"
+      },
+      "expected": {
+        "bytes": "0244e69c0a7a7d410300000000000000000000000000",
+        "rotating": false
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Input derived by setting byte 0 of the version-5 vector to 2 (as the test does).",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-024",
+      "description": "Version 3 announcement is rejected even with acceptRotating=true",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 118,
+        "method": "version5IsRejectedWithTheSwitchOffAndVersion2IsUnchanged"
+      },
+      "inputs": {
+        "bytes": "0344e69c0a7a7d410300000000000000000000000000",
+        "accept_rotating": true
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived by setting byte 0 of the version-5 vector (as the test does); the reason text is the decoder's message for any unsupported version.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-025",
+      "description": "Version 4 announcement is rejected even with acceptRotating=true",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 118,
+        "method": "version5IsRejectedWithTheSwitchOffAndVersion2IsUnchanged"
+      },
+      "inputs": {
+        "bytes": "0444e69c0a7a7d410300000000000000000000000000",
+        "accept_rotating": true
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived by setting byte 0 of the version-5 vector (as the test does); the reason text is the decoder's message for any unsupported version.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-026",
+      "description": "Version 6 announcement is rejected even with acceptRotating=true",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 118,
+        "method": "version5IsRejectedWithTheSwitchOffAndVersion2IsUnchanged"
+      },
+      "inputs": {
+        "bytes": "0644e69c0a7a7d410300000000000000000000000000",
+        "accept_rotating": true
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived by setting byte 0 of the version-5 vector (as the test does); the reason text is the decoder's message for any unsupported version.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-027",
+      "description": "Title page (version 3): route token 0x81234567, title \"Hi\" -> one page",
+      "provenance": {
+        "doc": "docs/PROTOCOL.md",
+        "section": "Peer labels: handles, names, call subjects and stream titles / Vectors",
+        "line": 270
+      },
+      "inputs": {
+        "route_token_hex": "81234567",
+        "title": "Hi"
+      },
+      "expected": {
+        "pages": [
+          "03812345673639014869"
+        ],
+        "fields": {
+          "version": "03",
+          "route_token": "81234567",
+          "sha256_title_first2": "3639",
+          "page": "01",
+          "title_bytes": "4869"
+        }
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": "Doc prints the page with spaces (03 81234567 3639 01 4869). TitlePageTest.shortTitleIsOnePageWithTheProtocolLayout builds the expectation from \"03\"+\"81234567\"+digest+\"01\"+\"4869\" with the digest computed by SHA-256 in the test; SHA-256(\"Hi\")[0:2] = 3639 was reproduced with tools/discovery_crypto.py. Layout: version 3 | route token(4) | SHA-256(title)[0:2] | page (index<<4 | count) | 1..19 title bytes.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-028",
+      "description": "A title page is not a 22-byte announcement: DiscoveryAnnouncementCodec.decode rejects it",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/TitlePageTest.kt",
+        "class": "TitlePageTest",
+        "line": 19,
+        "method": "shortTitleIsOnePageWithTheProtocolLayout"
+      },
+      "inputs": {
+        "bytes": "03812345673639014869"
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Invalid discovery announcement length"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Reason text is the decoder's length message (source MeshControlMessages.kt); the test asserts only failure.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-029",
+      "description": "Title page split: 18 ASCII bytes + 10 x U+20AC (48 UTF-8 bytes) never splits a code point: 3 pages (fragments of 18, 18, 12 bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/TitlePageTest.kt",
+        "class": "TitlePageTest",
+        "method": "multiByteTitleNeverSplitsACodePointAndReassemblesOutOfOrder",
+        "line": 24
+      },
+      "inputs": {
+        "route_token_hex": "81234567",
+        "title": "aaaaaaaaaaaaaaaaaa€€€€€€€€€€",
+        "title_utf8_bytes": 48
+      },
+      "expected": {
+        "pages": [
+          "03812345679e6303616161616161616161616161616161616161",
+          "03812345679e6313e282ace282ace282ace282ace282ace282ac",
+          "03812345679e6323e282ace282ace282ace282ac"
+        ],
+        "page_count": 3
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py title_pages(): TitlePageCodec.pages algorithm (19-byte fragments, back off over UTF-8 continuation bytes). The test asserts only 3 pages, each fragment valid UTF-8, each page <= 27 bytes, and out-of-order reassembly to the title; the page bytes are reproduced, not copied.",
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-030",
+      "description": "Title page is rejected: page index 1 of count 1 (byte 7 = 0x11)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/TitlePageTest.kt",
+        "class": "TitlePageTest",
+        "line": 61,
+        "method": "malformedPagesAreRejected"
+      },
+      "inputs": {
+        "bytes": "03812345673639114869"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the 'Hi' page by the stated mutation (as the test does).",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-031",
+      "description": "Title page is rejected: page count 0 (byte 7 = 0x00)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/TitlePageTest.kt",
+        "class": "TitlePageTest",
+        "line": 61,
+        "method": "malformedPagesAreRejected"
+      },
+      "inputs": {
+        "bytes": "03812345673639004869"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the 'Hi' page by the stated mutation (as the test does).",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-032",
+      "description": "Title page is rejected: empty fragment (page truncated to 8 bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/TitlePageTest.kt",
+        "class": "TitlePageTest",
+        "line": 61,
+        "method": "malformedPagesAreRejected"
+      },
+      "inputs": {
+        "bytes": "0381234567363901"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the 'Hi' page by the stated mutation (as the test does).",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-033",
+      "description": "Title longer than 48 UTF-8 bytes (49 x 'a') is refused by the page encoder",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/TitlePageTest.kt",
+        "class": "TitlePageTest",
+        "line": 68,
+        "method": "malformedPagesAreRejected"
+      },
+      "inputs": {
+        "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-034",
+      "description": "Name page (version 7): window RDI 44e69c0a7a7d, name \"Rahul\" -> one page: 07 | rdi(6) | SHA-256(name)[0:4] | page 0x01 | name bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "aPageHasTheDocumentedLayoutAndAtMostTwentyTwoBytes",
+        "line": 38
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": "Rahul"
+      },
+      "expected": {
+        "pages": [
+          "0744e69c0a7a7d69838bb001526168756c"
+        ],
+        "name_hash": "69838bb0"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + build_discovery.name_pages(): NamePageCodec.pages algorithm. The tests assert the layout (version 7, rdi at 1..6, hash at 7..10, control byte (index<<4)|count at 11, chunks <= 10 bytes, <= 22 bytes per page) but pin no literal page bytes.",
+      "kind": "encode",
+      "notes": "Layout also documented in docs/PROTOCOL.md 'Visible by name' (version 7). Names are split into the fewest pages of whole code points (exact minimum, <= 4 pages, <= 10 bytes per page)."
+    },
+    {
+      "id": "announcements-035",
+      "description": "Name page split of a 17-byte name \"Rahul Kumar-Singh\" (fewest pages of <=10 bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "aPageHasTheDocumentedLayoutAndAtMostTwentyTwoBytes",
+        "line": 39
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": "Rahul Kumar-Singh"
+      },
+      "expected": {
+        "pages": [
+          "0744e69c0a7a7d4c23527f02526168756c204b",
+          "0744e69c0a7a7d4c23527f12756d61722d53696e6768"
+        ]
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + build_discovery.name_pages()",
+      "kind": "encode",
+      "notes": "The test asserts page count 1..4, layout, and that the concatenated chunks equal the name."
+    },
+    {
+      "id": "announcements-036",
+      "description": "Name-page encoder: 3-byte code points: 10 x U+20AC (30 bytes) fits in <= 4 pages",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "aFourPageNameOfThreeAndFourByteCodePointsRoundTrips",
+        "line": 87
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": "€€€€€€€€€€"
+      },
+      "expected": {
+        "pages": [
+          "0744e69c0a7a7dd6742c3404e282ac",
+          "0744e69c0a7a7dd6742c3414e282ace282ace282ac",
+          "0744e69c0a7a7dd6742c3424e282ace282ace282ac",
+          "0744e69c0a7a7dd6742c3434e282ace282ace282ac"
+        ]
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + build_discovery.name_pages(); whether it fits (<= 4 pages) / is refused is the test's literal assertion",
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-037",
+      "description": "Name-page encoder: 4-byte code points: 8 x U+1F600 (32 bytes) fits in <= 4 pages",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "aFourPageNameOfThreeAndFourByteCodePointsRoundTrips",
+        "line": 87
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": "😀😀😀😀😀😀😀😀"
+      },
+      "expected": {
+        "pages": [
+          "0744e69c0a7a7d3d96b21104f09f9880f09f9880",
+          "0744e69c0a7a7d3d96b21114f09f9880f09f9880",
+          "0744e69c0a7a7d3d96b21124f09f9880f09f9880",
+          "0744e69c0a7a7d3d96b21134f09f9880f09f9880"
+        ]
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + build_discovery.name_pages(); whether it fits (<= 4 pages) / is refused is the test's literal assertion",
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-038",
+      "description": "Name-page encoder: 33 ASCII bytes is refused (null)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "aFourPageNameOfThreeAndFourByteCodePointsRoundTrips",
+        "line": 87
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": {
+        "pages": null,
+        "refused": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + build_discovery.name_pages(); whether it fits (<= 4 pages) / is refused is the test's literal assertion",
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-039",
+      "description": "Name-page encoder: empty name is refused (null)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "aFourPageNameOfThreeAndFourByteCodePointsRoundTrips",
+        "line": 87
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": ""
+      },
+      "expected": {
+        "pages": null,
+        "refused": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + build_discovery.name_pages(); whether it fits (<= 4 pages) / is refused is the test's literal assertion",
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-040",
+      "description": "Name page decoder is strict: rejects version byte 6",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theDecoderIsStrict",
+        "line": 100
+      },
+      "inputs": {
+        "bytes": "0644e69c0a7a7d69838bb001526168756c"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: mutation of the computed 'Rahul' page exactly as the test mutates its page (decode returns null); input bytes are reproduced, outcome is the test's assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-041",
+      "description": "Name page decoder is strict: rejects page count 0 (control byte 0x00)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theDecoderIsStrict",
+        "line": 100
+      },
+      "inputs": {
+        "bytes": "0744e69c0a7a7d69838bb000526168756c"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: mutation of the computed 'Rahul' page exactly as the test mutates its page (decode returns null); input bytes are reproduced, outcome is the test's assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-042",
+      "description": "Name page decoder is strict: rejects index 2 of count 5 (control 0x25)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theDecoderIsStrict",
+        "line": 100
+      },
+      "inputs": {
+        "bytes": "0744e69c0a7a7d69838bb025526168756c"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: mutation of the computed 'Rahul' page exactly as the test mutates its page (decode returns null); input bytes are reproduced, outcome is the test's assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-043",
+      "description": "Name page decoder is strict: rejects index 3 of count 1 (control 0x31)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theDecoderIsStrict",
+        "line": 100
+      },
+      "inputs": {
+        "bytes": "0744e69c0a7a7d69838bb031526168756c"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: mutation of the computed 'Rahul' page exactly as the test mutates its page (decode returns null); input bytes are reproduced, outcome is the test's assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-044",
+      "description": "Name page decoder is strict: rejects trailing 20 zero bytes (more than 10 chunk bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theDecoderIsStrict",
+        "line": 100
+      },
+      "inputs": {
+        "bytes": "0744e69c0a7a7d69838bb001526168756c0000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: mutation of the computed 'Rahul' page exactly as the test mutates its page (decode returns null); input bytes are reproduced, outcome is the test's assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-045",
+      "description": "Name page decoder is strict: rejects header only (12 bytes, no chunk byte)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theDecoderIsStrict",
+        "line": 100
+      },
+      "inputs": {
+        "bytes": "000000000000000000000000"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: mutation of the computed 'Rahul' page exactly as the test mutates its page (decode returns null); input bytes are reproduced, outcome is the test's assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-046",
+      "description": "Window offer (version 8): RDI 44e69c0a7a7d, flags 0x41 (accepting + private call), summary 3, token = SHA-256(\"Rahul\")[0:4], cost 0",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theWindowOfferIsVersion8CarriesTheHashAndIsInvisibleToOldDecoders",
+        "line": 115
+      },
+      "inputs": {
+        "window_rdi": "44e69c0a7a7d",
+        "name": "Rahul",
+        "transport_flags": 0,
+        "capability_summary": 3
+      },
+      "expected": {
+        "bytes": "0844e69c0a7a7d410369838bb0000000000000000000",
+        "announcement": {
+          "version": 8,
+          "node_id_prefix": "44e69c0a7a7d",
+          "flags": 65,
+          "capability_summary": 3,
+          "stream_token_hex": "69838bb0",
+          "route_cost": 0,
+          "sequence": 0,
+          "stream_width": 0,
+          "stream_height": 0,
+          "stream_fps": 0,
+          "stream_bitrate_kbps": 0
+        }
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py + WindowOffer.announcement(): the test asserts version 8, length 22, byte 0 == 8 and token == commitment; the full bytes are reproduced",
+      "kind": "encode",
+      "notes": "docs/PROTOCOL.md 'Visible by name': version 8 = version-5 layout, flags = accepting connections + private call available, streamToken = SHA-256(UTF-8 name)[0:4]."
+    },
+    {
+      "id": "announcements-047",
+      "description": "Window offer decode with acceptRotating=True acceptWindow=False is rejected (Unsupported announcement version)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theWindowOfferIsVersion8CarriesTheHashAndIsInvisibleToOldDecoders",
+        "line": 128
+      },
+      "inputs": {
+        "bytes": "0844e69c0a7a7d410369838bb0000000000000000000",
+        "accept_rotating": true,
+        "accept_window": false
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: bytes reproduced as above; accept/reject outcome is the test's literal assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-048",
+      "description": "Window offer decode with acceptRotating=False acceptWindow=False is rejected (Unsupported announcement version)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theWindowOfferIsVersion8CarriesTheHashAndIsInvisibleToOldDecoders",
+        "line": 128
+      },
+      "inputs": {
+        "bytes": "0844e69c0a7a7d410369838bb0000000000000000000",
+        "accept_rotating": false,
+        "accept_window": false
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Unsupported announcement version"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: bytes reproduced as above; accept/reject outcome is the test's literal assertion",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-049",
+      "description": "Window offer decode with acceptRotating=True acceptWindow=True succeeds",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theWindowOfferIsVersion8CarriesTheHashAndIsInvisibleToOldDecoders",
+        "line": 128
+      },
+      "inputs": {
+        "bytes": "0844e69c0a7a7d410369838bb0000000000000000000",
+        "accept_rotating": true,
+        "accept_window": true
+      },
+      "expected": {
+        "decodes": true,
+        "is_window_offer": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: bytes reproduced as above; accept/reject outcome is the test's literal assertion",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-050",
+      "description": "A version-7 name page is not an announcement: the announcement decoder rejects it even with acceptRotating and acceptWindow",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/NamePageTest.kt",
+        "class": "NamePageTest",
+        "method": "theWindowOfferIsVersion8CarriesTheHashAndIsInvisibleToOldDecoders",
+        "line": 131
+      },
+      "inputs": {
+        "bytes": "0744e69c0a7a7d69838bb001526168756c",
+        "accept_rotating": true,
+        "accept_window": true
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: page bytes reproduced; rejection is the test's assertion (length is not 22)",
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-051",
+      "description": "Reach page version 6: relay RDI 44e69c0a7a7d, flags 0x09 (CoC|idle), index 0 of 1, one entry: target fecba64983fd, cost 1, age 3, via fecb",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 60,
+        "method": "version6PageMatchesTheVectorAndDecodesAsRotating"
+      },
+      "inputs": {
+        "relay_prefix": "44e69c0a7a7d",
+        "relay_flags": 9,
+        "index": 0,
+        "count": 1,
+        "rotating": true,
+        "entries": [
+          {
+            "target": "fecba64983fd",
+            "cost": 1,
+            "age_units": 3,
+            "via": "fecb"
+          }
+        ]
+      },
+      "expected": {
+        "bytes": "0644e69c0a7a7d0901fecba64983fd23fecb"
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Layout: version(1: 4 fixed-prefix, 6 RDI) | relay prefix(6) | relay flags(1: 1 CoC, 2 GATT, 8 idle) | (index<<4 | count)(1) | per entry: target(6) | (cost<<5 | age units of 2 s)(1) | via(2). The entry byte 0x23 = cost 1, age 3. 2 entries max per page."
+    },
+    {
+      "id": "announcements-052",
+      "description": "Two-entry version 6 reach page (27 bytes): page 1 of 2, entries (fecba64983fd cost 2 age 31 via a1b2) and (974ae410ea91 cost 1 age 0 via 974a)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 85,
+        "method": "twoEntryVersion6PageMatchesTheVector"
+      },
+      "inputs": {
+        "relay_prefix": "44e69c0a7a7d",
+        "relay_flags": 9,
+        "index": 1,
+        "count": 2,
+        "rotating": true,
+        "entries": [
+          {
+            "target": "fecba64983fd",
+            "cost": 2,
+            "age_units": 31,
+            "via": "a1b2"
+          },
+          {
+            "target": "974ae410ea91",
+            "cost": 1,
+            "age_units": 0,
+            "via": "974a"
+          }
+        ]
+      },
+      "expected": {
+        "bytes": "0644e69c0a7a7d0912fecba64983fd5fa1b2974ae410ea9120974a",
+        "length": 27
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-053",
+      "description": "The same bytes with version byte 4 are the fixed-prefix reach page (rotating=false); isReachPage accepts versions 4 and 6 only",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 69,
+        "method": "version6PageMatchesTheVectorAndDecodesAsRotating"
+      },
+      "inputs": {
+        "bytes": "0444e69c0a7a7d0901fecba64983fd23fecb"
+      },
+      "expected": {
+        "rotating": false,
+        "is_reach_page": true
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Input derived by setting byte 0 to 4.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-054",
+      "description": "Reach page with version byte 5 is not a reach page (isReachPage false); decode throws",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 70,
+        "method": "version6PageMatchesTheVectorAndDecodesAsRotating"
+      },
+      "inputs": {
+        "bytes": "0544e69c0a7a7d0901fecba64983fd23fecb"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived by setting byte 0.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-055",
+      "description": "Reach page with version byte 3 is not a reach page (isReachPage false)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 71,
+        "method": "version6PageMatchesTheVectorAndDecodesAsRotating"
+      },
+      "inputs": {
+        "bytes": "0344e69c0a7a7d0901fecba64983fd23fecb"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived by setting byte 0.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "announcements-056",
+      "description": "Relay SETUP message 4 (rotating target): BRS1 | 04 | target RDI 974ae410ea91 | budget 2 | remaining 20000 ms | setup ID 0102030405060708 (24 bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 268,
+        "method": "setupMessage4HasTheSameBodyAndIsUnknownUnlessOptedIn"
+      },
+      "inputs": {
+        "target": "974ae410ea91",
+        "budget": 2,
+        "remaining_ms": 20000,
+        "setup_id": "0102030405060708",
+        "rotating": true
+      },
+      "expected": {
+        "bytes": "4252533104974ae410ea910200004e200102030405060708",
+        "length": 24
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Same body as SETUP type 1 (fixed prefix) with type byte 4."
+    },
+    {
+      "id": "announcements-057",
+      "description": "Relay SETUP message 1 (fixed prefix) with the same body",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 270,
+        "method": "setupMessage4HasTheSameBodyAndIsUnknownUnlessOptedIn"
+      },
+      "inputs": {
+        "target": "974ae410ea91",
+        "budget": 2,
+        "remaining_ms": 20000,
+        "setup_id": "0102030405060708",
+        "rotating": false
+      },
+      "expected": {
+        "bytes": "4252533101974ae410ea910200004e200102030405060708"
+      },
+      "expected_literal": true,
+      "kind": "encode",
+      "notes": ""
+    },
+    {
+      "id": "announcements-058",
+      "description": "SETUP message 4 is rejected as an unknown message by a reader that has not opted in (acceptRdi=false)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ReachRotatingTest.kt",
+        "class": "ReachRotatingTest",
+        "line": 277,
+        "method": "setupMessage4HasTheSameBodyAndIsUnknownUnlessOptedIn"
+      },
+      "inputs": {
+        "bytes": "4252533104974ae410ea910200004e200102030405060708",
+        "accept_rdi": false
+      },
+      "expected": {
+        "rejected": true,
+        "reason": "Relay setup message 4"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "announcements-059",
+      "description": "Primary advertising budget: connectable=True discoverable=True SDK 29 -> 28 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": true,
+        "discoverable": true,
+        "sdk": 29
+      },
+      "expected": {
+        "primary_budget_bytes": 28
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-060",
+      "description": "Primary advertising budget: connectable=True discoverable=True SDK 33 -> 28 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": true,
+        "discoverable": true,
+        "sdk": 33
+      },
+      "expected": {
+        "primary_budget_bytes": 28
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-061",
+      "description": "Primary advertising budget: connectable=True discoverable=False SDK 33 -> 28 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": true,
+        "discoverable": false,
+        "sdk": 33
+      },
+      "expected": {
+        "primary_budget_bytes": 28
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-062",
+      "description": "Primary advertising budget: connectable=False discoverable=True SDK 33 -> 31 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": false,
+        "discoverable": true,
+        "sdk": 33
+      },
+      "expected": {
+        "primary_budget_bytes": 31
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-063",
+      "description": "Primary advertising budget: connectable=True discoverable=True SDK 34 -> 28 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": true,
+        "discoverable": true,
+        "sdk": 34
+      },
+      "expected": {
+        "primary_budget_bytes": 28
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-064",
+      "description": "Primary advertising budget: connectable=True discoverable=False SDK 34 -> 31 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": true,
+        "discoverable": false,
+        "sdk": 34
+      },
+      "expected": {
+        "primary_budget_bytes": 31
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-065",
+      "description": "Primary advertising budget: connectable=True discoverable=False SDK 36 -> 31 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": true,
+        "discoverable": false,
+        "sdk": 36
+      },
+      "expected": {
+        "primary_budget_bytes": 31
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-066",
+      "description": "Primary advertising budget: connectable=False discoverable=True SDK 36 -> 31 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 21,
+        "method": "theConnectableBudgetIs28BytesOnAndroid13AndBelowAnd31OnlyForANonDiscoverableSetOnAndroid14"
+      },
+      "inputs": {
+        "connectable": false,
+        "discoverable": true,
+        "sdk": 36
+      },
+      "expected": {
+        "primary_budget_bytes": 31
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local rule (not wire): a connectable legacy advertisement has 28 usable bytes on Android 13 and below (flags always charged) and 31 on Android 14+ when the set is non-discoverable; the scan response is always 31."
+    },
+    {
+      "id": "announcements-067",
+      "description": "Advertising payload sizes: one 128-bit service UUID in the primary PDU = 18 bytes; the 22-byte announcement as manufacturer data = 26 bytes (22 + 4); both together = 44 bytes (exceeds even 31, hence the scan response)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 94,
+        "method": "theUuidAndTheAnnouncementCouldNotShareOnePrimaryPayload"
+      },
+      "inputs": {
+        "service_uuids_128": 1,
+        "manufacturer_payload_bytes": 22
+      },
+      "expected": {
+        "primary_bytes": 18,
+        "scan_response_bytes": 26,
+        "together_bytes": 44,
+        "legacy_max": 31
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "announcements-068",
+      "description": "Largest pages fit the 31-byte scan response: a full title page (3 pages for a 48-byte title) uses all 31 bytes (27 + 4); reach pages (4 pages, 2 entries each) use 31",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 123,
+        "method": "theLargestTitleReachAndNamePagesFitTheScanResponse"
+      },
+      "inputs": {
+        "title_bytes": 48,
+        "reach_entries": 8
+      },
+      "expected": {
+        "title_pages": 3,
+        "largest_title_page_adv_bytes": 31,
+        "reach_pages": 4,
+        "largest_reach_page_adv_bytes": 31
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "announcements-069",
+      "description": "describe() debug line: primary=18/28 scan=26/31 (SDK 33) and primary=18/31 scan=26/31 (SDK 34, non-discoverable)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AdvertisingPayloadTest.kt",
+        "class": "AdvertisingPayloadTest",
+        "line": 135,
+        "method": "describeShowsTheMarginForTheDebugLine"
+      },
+      "inputs": {
+        "primary": 18,
+        "scan": 26,
+        "connectable": true,
+        "discoverable": [
+          true,
+          false
+        ],
+        "sdk": [
+          33,
+          34
+        ]
+      },
+      "expected": {
+        "lines": [
+          "primary=18/28 scan=26/31",
+          "primary=18/31 scan=26/31"
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Diagnostic string; not a wire format."
+    }
+  ],
+  "description": "22-byte discovery announcement (manufacturer data 0xFFFF in the scan response): stable version 2, rotating version 5, window offer version 8; dual-listening hint; title pages (v3), name pages (v7), reach pages (v4/v6) and relay SETUP; advertising payload budgets. 22-byte announcement (DiscoveryAnnouncementCodec): version(1) | node prefix or RDI(6) | flags(1) | capabilitySummary(1) | streamToken(4, BE) | routeCost(1) | [sequence(1) | width(2) | height(2) | fps(1)] or [recovery-from prefix(6) when flags&0x80] | bitrateKbps(2). Versions: 2 fixed prefix, 5 rotating discovery ID, 8 window offer (decoded only with acceptWindow). announcement flags: 0x01 accepting connections, 0x02 relay capable, 0x04 stream available, 0x08 GATT transport, 0x10 Classic transport, 0x20 stream paused, 0x40 private call available, 0x80 route recovery. capabilitySummary: bit0 VP9, bit1 AV1, bit2 reserved H.264, bit3 dual-listening hint, bit4 relayed-call consent. Integers named *_hex are big-endian lowercase hex."
+}

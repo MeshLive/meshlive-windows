@@ -1,0 +1,126 @@
+name: PC test report
+description: Tell us how MeshLive worked on your PC and Bluetooth adapter (reports where everything worked are just as useful).
+title: "[PC] <PC model>, Windows <version>, <Bluetooth adapter>"
+labels: ["device-compat", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Reports like this fill in docs/devices.md and decide which Bluetooth adapters can be added to
+        the adapter allowlist.
+
+        Please answer for **your own PC**, tested with at least one phone running MeshLive. For each item, choose
+        **Pass** only if it worked for a few minutes without restarting the app or Bluetooth. Choose **Partial** if it
+        worked but badly (very slow, frequent freezes, only in some conditions), **Fail** if it did not work, and
+        **Not tested** if you did not try it.
+
+        Do not post photos, recordings or names of other people, and do not post Bluetooth addresses or serial
+        numbers. Security problems: do not post details here; use the repository's Security tab.
+  - type: input
+    id: pc
+    attributes:
+      label: PC model
+      placeholder: "Laptop or desktop model"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows edition, version and build, x64 or ARM64
+      description: Settings > System > About.
+      placeholder: "Windows 11 Pro 24H2, build 26100.xxxx, x64"
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Bluetooth adapter and USB vendor ID
+      description: >-
+        Device Manager > Bluetooth: the adapter's name, and the 4 digits after VID_ in Properties > Details >
+        Hardware Ids. Built-in or USB dongle? Do not post its Bluetooth address.
+      placeholder: "Intel(R) Wireless Bluetooth(R), VID_8087, built in"
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App version or commit
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone(s) you tested with
+      description: Model, Android version and MeshLive version.
+      placeholder: "Pixel 8, Android 15, MeshLive 0.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: receive
+    attributes:
+      label: What Settings > Calls says about receiving calls on this PC
+      options: ["Receive calls is available", "Unavailable: adapter not checked yet", "Unavailable: needs Windows 11 24H2", "Unavailable: other reason (say in the notes)", "Did not look"]
+    validations:
+      required: true
+  - type: dropdown
+    id: call_out
+    attributes:
+      label: PC calls the phone (voice and video)
+      options: ["Pass", "Partial", "Fail", "Not tested"]
+      default: 3
+    validations:
+      required: true
+  - type: dropdown
+    id: call_in
+    attributes:
+      label: Phone calls the PC (voice and video)
+      options: ["Pass", "Partial", "Fail", "Not tested"]
+      default: 3
+    validations:
+      required: true
+  - type: dropdown
+    id: contact
+    attributes:
+      label: Add contact (phone scans the PC's code, PC scans the phone's code)
+      options: ["Pass", "Partial", "Fail", "Not tested"]
+      default: 3
+    validations:
+      required: true
+  - type: dropdown
+    id: watch
+    attributes:
+      label: Watch a phone's live stream (experimental, MESHLIVE_WATCH=1)
+      options: ["Pass", "Partial", "Fail", "Not tested"]
+      default: 3
+    validations:
+      required: true
+  - type: dropdown
+    id: golive
+    attributes:
+      label: Go live from the PC (experimental, MESHLIVE_GO_LIVE=1)
+      options: ["Pass", "Partial", "Fail", "Not tested"]
+      default: 3
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: >-
+        What you saw and roughly when (for example "video froze every 20 s", "the phone never listed the PC",
+        "worked with the PC locked"). Mention distance, Wi-Fi on 2.4 GHz, and other Bluetooth devices in use.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report (optional but very helpful)
+      description: Paste the text saved by Settings > Export diagnostics.
+      render: text
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Before you submit
+      options:
+        - label: I did not include recordings, photos, other people's names, Bluetooth addresses or anything I do not want public.
+          required: true

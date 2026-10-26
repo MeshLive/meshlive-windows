@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/MeshLive/meshlive-windows/security/advisories/new
+    about: Report vulnerabilities privately through GitHub Security Advisories, never in a public issue.
+  - name: Android app or protocol
+    url: https://github.com/MeshLive/meshlive-android/issues
+    about: Problems that only involve phones, and protocol changes, belong in meshlive-android.

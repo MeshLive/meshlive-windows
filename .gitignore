@@ -1,0 +1,5 @@
+.cache/
+.artifacts/
+*.pfx
+*.cer
+*.p12

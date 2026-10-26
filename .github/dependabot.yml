@@ -1,0 +1,24 @@
+# Weekly update checks for the Rust crates and for the pinned GitHub Actions.
+#
+# Cargo note: every crate is pinned with "=" in Cargo.toml and locked in Cargo.lock, and
+# THIRD_PARTY_NOTICES.md lists each crate's licence. A Dependabot pull request only bumps the version; a
+# maintainer must run the full test suite (scripts\Build.ps1 -Action Test -Configuration Release), regenerate
+# the notices (python -B scripts\third_party.py) and test calls with a phone before merging. Native sources
+# (libopus, libaom, libvpx) are pinned by SHA-256 in sources.lock.json and are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels: ["dependencies"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels: ["dependencies"]

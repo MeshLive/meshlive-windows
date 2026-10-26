@@ -1,0 +1,371 @@
+{
+  "schema": "meshlive-conformance-vectors/1",
+  "area": "leases",
+  "android_commit": "bca3031f8dae52bc149eb55e84f3f3f18f47a623",
+  "vectors": [
+    {
+      "id": "leases-001",
+      "description": "Migration derivation domain bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 33,
+        "method": "leaseKeysAndOwnIdsMatchTheIndependentVectors"
+      },
+      "inputs": {
+        "ascii": "BluetoothVideoMesh/Discovery/Lease/2",
+        "terminator": "NUL"
+      },
+      "expected": {
+        "lease_domain": "426c7565746f6f7468566964656f4d6573682f446973636f766572792f4c656173652f3200"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Also docs/PROTOCOL.md line 540 (agrees)."
+    },
+    {
+      "id": "leases-002",
+      "description": "Day of epoch 1990656 is 20736; epoch+95 is still day 20736; epoch+96 is day 20737",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 38,
+        "method": "leaseKeysAndOwnIdsMatchTheIndependentVectors"
+      },
+      "inputs": {
+        "epochs": [
+          1990656,
+          1990751,
+          1990752
+        ]
+      },
+      "expected": {
+        "days": [
+          20736,
+          20736,
+          20737
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Also docs/PROTOCOL.md line 540 (day 20736)."
+    },
+    {
+      "id": "leases-003",
+      "description": "Migration: L_d for P = 00..1f and day 20736",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 39,
+        "method": "leaseKeysAndOwnIdsMatchTheIndependentVectors"
+      },
+      "inputs": {
+        "P": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "day": 20736
+      },
+      "expected": {
+        "lease_key": "6484923eb4b0b044dfb4d38feda471b389ec3b18e6fa199a41e22642f7f786b5"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "P is the bytes 00..1f. Also docs/PROTOCOL.md line 541 (agrees). Reproduced in tools/discovery_crypto.py."
+    },
+    {
+      "id": "leases-004",
+      "description": "Migration: L_(d+1) for P = 00..1f and day 20737",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 40,
+        "method": "leaseKeysAndOwnIdsMatchTheIndependentVectors"
+      },
+      "inputs": {
+        "P": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "day": 20737
+      },
+      "expected": {
+        "lease_key": "c32a563c90e92cb68e786a09357ba1b499ae20c8f122be7b10863ae635b016c7"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "leases-005",
+      "description": "Owner's own role-0 salt / RDI for epoch 1990656 using the migrated L_d of day 20736 as the salt key",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 42,
+        "method": "leaseKeysAndOwnIdsMatchTheIndependentVectors"
+      },
+      "inputs": {
+        "salt_key": "6484923eb4b0b044dfb4d38feda471b389ec3b18e6fa199a41e22642f7f786b5",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990656,
+        "role": 0
+      },
+      "expected": {
+        "salt": "81b9be731a7cdddd1954e543fb9b712dd963a24d08dcf1876ed219d00cab8ae9",
+        "rdi": "fecba64983fd"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Also docs/PROTOCOL.md line 542 (agrees)."
+    },
+    {
+      "id": "leases-006",
+      "description": "Delivery window: a migrated window holds yesterday..day+27 at the first epoch of a day; a delivery is today and the next 27 days (28 leases); an incomplete window delivers nothing",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 248,
+        "method": "theMigrationWindowIsTheEarlierDerivationForTodayAndTheNext27Days"
+      },
+      "inputs": {
+        "P": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "epoch": 1990656
+      },
+      "expected": {
+        "window_days": [
+          20735,
+          20762
+        ],
+        "delivery_leases": 28,
+        "delivery_bytes": 914,
+        "missing_day_delivers": null
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "leases-007",
+      "description": "Day-key window rule: fresh window = today..today+27; same day changes nothing; the first epoch of the next day adds day+28 and keeps yesterday; one epoch later yesterday is deleted; a phone off >1 month gets a whole new window",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 198,
+        "method": "theWindowIsTodayPlus27AndYesterdayOnlyAtTheFirstEpochOfADay"
+      },
+      "inputs": {
+        "first_epoch_of_day": 1990656,
+        "steps": [
+          "fresh(first)",
+          "roll(first+95)",
+          "roll(first+96)",
+          "roll(first+97)",
+          "roll(first+40*96) from fresh"
+        ]
+      },
+      "expected": {
+        "days": [
+          [
+            20736,
+            20763
+          ],
+          [
+            20736,
+            20763
+          ],
+          [
+            20736,
+            20764
+          ],
+          [
+            20737,
+            20764
+          ],
+          [
+            20776,
+            20803
+          ]
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Keys are independent random 32-byte values per day (no ratchet from other days); behavioural."
+    },
+    {
+      "id": "leases-008",
+      "description": "Recognition window: a contact whose lease sender is 2 epochs ahead (skew +2) recognises role 0 IDs for sender epochs centre-1..centre+1 (6 table entries = 3 epochs x roles 0 and 1) and nothing at centre-2 or for role 2",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "method": "recognitionUsesTheLearnedSkewAndAOneEpochWindow",
+        "line": 144
+      },
+      "inputs": {
+        "lease_holder_clock_epoch": 1990656,
+        "lease_sender_epoch": 1990658,
+        "P": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "hit_rdis": {
+          "1990657": "e92cd7bfd41f",
+          "1990658": "3bacc852be89",
+          "1990659": "97a6443e1460"
+        },
+        "miss_rdis": {
+          "epoch centre-2 role 0": "fecba64983fd"
+        }
+      },
+      "expected": {
+        "table_size": 6,
+        "stale_skew_table_size": 22,
+        "stale_skew_after_days": 14,
+        "hits": "centre-1, centre, centre+1 (role 0)",
+        "misses": "centre-2 and role 2"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py (RDI derivation with the lease key L_d as salt key); table sizes 6 and 22 and the hit/miss outcomes are the test's literal assertions (the 22 is for a skew older than 14 days: window +-8 clipped to days the lease covers)",
+      "kind": "derive",
+      "notes": "Recognition (RV3): a received lease lets the holder recompute the sender's IDs for [sender epoch - 1, +1] around the learned clock skew; a lease does not resolve IDs before its first day (RD5)."
+    },
+    {
+      "id": "leases-009",
+      "description": "Contact lease skew is clamped to +-30 days of epochs (2880)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceLeasesTest.kt",
+        "class": "PresenceLeasesTest",
+        "line": 128,
+        "method": "receiverReplacesOnHigherMergesOnEqualAndIgnoresLowerGenerations"
+      },
+      "inputs": {
+        "lease_sender_epoch_minus_my_epoch": 10000
+      },
+      "expected": {
+        "skew_epochs": 2880
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "MAX_SKEW_EPOCHS = 30 * epochsPerDay (96) = 2880 (source PresenceLeases.kt:263). Receiver rules: higher generation replaces, equal merges, lower is ignored."
+    },
+    {
+      "id": "leases-010",
+      "description": "Presence store plaintext codec (local file, sealed before writing; not a wire format): 'BPS1' | version 2 | generation u32 | key count u8 | count x (day u32, L_d(32)) | contact count u16 | count x contact",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/PresenceStore.kt",
+        "class": "PresenceStateCodec",
+        "line": 45
+      },
+      "inputs": {
+        "generation": 1,
+        "day_keys": [
+          {
+            "day": 20736,
+            "key": "0707070707070707070707070707070707070707070707070707070707070707"
+          }
+        ],
+        "contacts": []
+      },
+      "expected": {
+        "plaintext": "425053310200000001010000510007070707070707070707070707070707070707070707070707070707070707070000"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/build_discovery.py: layout transcribed from the codec's doc comment; PresenceStoreTest asserts round trip and the rejections below but no literal bytes. Contact layout (node ID 16 | visibleToThem u8 | deliveredGeneration u32 | optional presence) is in PresenceStateCodec.encode.",
+      "kind": "encode",
+      "notes": "Local-only format (sealed by the Keystore AES-GCM wrapper); included so a second implementation can read a migrated store. Version 1 stores held one long-lived key P instead of the key block ('BPS1' | 01 | generation u32 | P(32) | contacts) and are converted once."
+    },
+    {
+      "id": "leases-011",
+      "description": "Presence store decoder rejects: trailing byte after a valid store",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceStoreTest.kt",
+        "class": "PresenceStoreTest",
+        "method": "theDecoderRejectsTrailingBytesDuplicatesAndBadMagic",
+        "line": 135
+      },
+      "inputs": {
+        "mutation_of_valid_store": "trailing byte after a valid store"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "not reproduced as bytes: the test builds the inputs in code by the stated mutation of PresenceStateCodec.encode output; only the rejection is asserted",
+      "kind": "reject",
+      "notes": "Non-literal, no bytes. Local store only."
+    },
+    {
+      "id": "leases-012",
+      "description": "Presence store decoder rejects: wrong magic ('X' for 'B')",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceStoreTest.kt",
+        "class": "PresenceStoreTest",
+        "method": "theDecoderRejectsTrailingBytesDuplicatesAndBadMagic",
+        "line": 135
+      },
+      "inputs": {
+        "mutation_of_valid_store": "wrong magic ('X' for 'B')"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "not reproduced as bytes: the test builds the inputs in code by the stated mutation of PresenceStateCodec.encode output; only the rejection is asserted",
+      "kind": "reject",
+      "notes": "Non-literal, no bytes. Local store only."
+    },
+    {
+      "id": "leases-013",
+      "description": "Presence store decoder rejects: duplicate contact (count 2, same node twice)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceStoreTest.kt",
+        "class": "PresenceStoreTest",
+        "method": "theDecoderRejectsTrailingBytesDuplicatesAndBadMagic",
+        "line": 135
+      },
+      "inputs": {
+        "mutation_of_valid_store": "duplicate contact (count 2, same node twice)"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "not reproduced as bytes: the test builds the inputs in code by the stated mutation of PresenceStateCodec.encode output; only the rejection is asserted",
+      "kind": "reject",
+      "notes": "Non-literal, no bytes. Local store only."
+    },
+    {
+      "id": "leases-014",
+      "description": "Presence store decoder rejects: key block with the same day twice",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceStoreTest.kt",
+        "class": "PresenceStoreTest",
+        "method": "theDecoderRejectsTrailingBytesDuplicatesAndBadMagic",
+        "line": 135
+      },
+      "inputs": {
+        "mutation_of_valid_store": "key block with the same day twice"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "not reproduced as bytes: the test builds the inputs in code by the stated mutation of PresenceStateCodec.encode output; only the rejection is asserted",
+      "kind": "reject",
+      "notes": "Non-literal, no bytes. Local store only."
+    },
+    {
+      "id": "leases-015",
+      "description": "Presence store decoder rejects: state with no key at all",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/PresenceStoreTest.kt",
+        "class": "PresenceStoreTest",
+        "method": "theDecoderRejectsTrailingBytesDuplicatesAndBadMagic",
+        "line": 135
+      },
+      "inputs": {
+        "mutation_of_valid_store": "state with no key at all"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": false,
+      "computed_by": "not reproduced as bytes: the test builds the inputs in code by the stated mutation of PresenceStateCodec.encode output; only the rejection is asserted",
+      "kind": "reject",
+      "notes": "Non-literal, no bytes. Local store only."
+    }
+  ],
+  "description": "Presence leases (Phase 2 recognition): independent daily keys L_d, the migration derivation from a long-lived key P, day numbering, the 28-day delivery and the recognition window. Lease key (migration only) = HMAC-SHA256(P, 'BluetoothVideoMesh/Discovery/Lease/2' || NUL || u32 day). day = floor(epoch * 900 / 86400) (96 epochs per day). The sealed on-disk store is local, not a wire format."
+}

@@ -1,0 +1,1110 @@
+{
+  "schema": "meshlive-conformance-vectors/1",
+  "area": "rotating-ids",
+  "android_commit": "bca3031f8dae52bc149eb55e84f3f3f18f47a623",
+  "vectors": [
+    {
+      "id": "rotating-ids-001",
+      "description": "Salt domain bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 37,
+        "method": "domainsAndEpochMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "ascii": "BluetoothVideoMesh/Discovery/Salt/1",
+        "terminator": "NUL"
+      },
+      "expected": {
+        "salt_domain": "426c7565746f6f7468566964656f4d6573682f446973636f766572792f53616c742f3100"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-002",
+      "description": "Id domain bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 41,
+        "method": "domainsAndEpochMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "ascii": "BluetoothVideoMesh/Discovery/Id/1",
+        "terminator": "NUL"
+      },
+      "expected": {
+        "id_domain": "426c7565746f6f7468566964656f4d6573682f446973636f766572792f49642f3100"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-003",
+      "description": "Wall epoch of unix time 1791590400 (2026-10-10T00:00:00Z) with 900 s epochs = 1990656 = 0x001e6000",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 44,
+        "method": "domainsAndEpochMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "unix_seconds": 1791590400,
+        "epoch_seconds": 900
+      },
+      "expected": {
+        "epoch": 1990656,
+        "epoch_hex": "001e6000"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "epoch = floor(unix / 900). Also docs/PROTOCOL.md line 526."
+    },
+    {
+      "id": "rotating-ids-004",
+      "description": "Role 0 salt / RDI (presence key P = 00..1f, node a1b2c3d4e5f60718293a4b5c6d7e8f90, epoch 1990656, role 0)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 51,
+        "method": "saltsAndIdsMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990656,
+        "role": 0
+      },
+      "expected": {
+        "salt": "d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167",
+        "rdi": "44e69c0a7a7d"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "salt_key is the bytes 00 01 02 .. 1f (the test builds it as ByteArray(32){it.toByte()}), reproduced with tools/discovery_crypto.py (self-check passes). Same values in docs/PROTOCOL.md line 530 (agrees). Phones publish with a random day key L_d as the salt key; the vector uses P as the salt key."
+    },
+    {
+      "id": "rotating-ids-005",
+      "description": "Role 1 salt / RDI (presence key P = 00..1f, node a1b2c3d4e5f60718293a4b5c6d7e8f90, epoch 1990656, role 1)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 52,
+        "method": "saltsAndIdsMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990656,
+        "role": 1
+      },
+      "expected": {
+        "salt": "dcd9349e228e00ceb4a7ec2e7e023fc0c34c507f88e99934897105ca4fae84c0",
+        "rdi": "bb2d061f6480"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "salt_key is the bytes 00 01 02 .. 1f (the test builds it as ByteArray(32){it.toByte()}), reproduced with tools/discovery_crypto.py (self-check passes). Same values in docs/PROTOCOL.md line 531 (agrees). Phones publish with a random day key L_d as the salt key; the vector uses P as the salt key."
+    },
+    {
+      "id": "rotating-ids-006",
+      "description": "Role 2 salt / RDI (presence key P = 00..1f, node a1b2c3d4e5f60718293a4b5c6d7e8f90, epoch 1990656, role 2)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 53,
+        "method": "saltsAndIdsMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990656,
+        "role": 2
+      },
+      "expected": {
+        "salt": "e59970c8523f23a6b1b16a858daf75320e3291d6c86d0329df89a62899804335",
+        "rdi": "974ae410ea91"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "salt_key is the bytes 00 01 02 .. 1f (the test builds it as ByteArray(32){it.toByte()}), reproduced with tools/discovery_crypto.py (self-check passes). Same values in docs/PROTOCOL.md line 532 (agrees). Phones publish with a random day key L_d as the salt key; the vector uses P as the salt key."
+    },
+    {
+      "id": "rotating-ids-007",
+      "description": "Role 0, epoch + 1 salt / RDI (presence key P = 00..1f, node a1b2c3d4e5f60718293a4b5c6d7e8f90, epoch 1990657, role 0)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 54,
+        "method": "saltsAndIdsMatchTheReviewedVectors"
+      },
+      "inputs": {
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990657,
+        "role": 0
+      },
+      "expected": {
+        "salt": "7ece98afad0378297e68c9e2b59c1a1f88448a0c70b86d91f192f65d263a763b",
+        "rdi": "67aba670e65a"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "salt_key is the bytes 00 01 02 .. 1f (the test builds it as ByteArray(32){it.toByte()}), reproduced with tools/discovery_crypto.py (self-check passes). Same values in docs/PROTOCOL.md line 533 (agrees). Phones publish with a random day key L_d as the salt key; the vector uses P as the salt key."
+    },
+    {
+      "id": "rotating-ids-008",
+      "description": "Role 3 (window offer) salt / RDI, same inputs as the role 0-2 vectors, epoch 1990656",
+      "provenance": [
+        {
+          "doc": "docs/PROTOCOL.md",
+          "section": "Visible by name: Role 3 ID",
+          "line": 316
+        }
+      ],
+      "inputs": {
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990656,
+        "role": 3
+      },
+      "expected": {
+        "salt": "64b1db2c9d60d6bd5c05b606edbf5941d43c3bff5b0e0cd1e51ea29d9ac6145c",
+        "rdi": "351401d0aca4"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py rd_salt/rd_rdi (the same functions reproduce the four literal vectors above). Neither the tests nor the doc pin a role-3 value; the doc gives only the formula.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-009",
+      "description": "Role 3 (window offer) salt / RDI, same inputs as the role 0-2 vectors, epoch 1990657",
+      "provenance": [
+        {
+          "doc": "docs/PROTOCOL.md",
+          "section": "Visible by name: Role 3 ID",
+          "line": 316
+        }
+      ],
+      "inputs": {
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "epoch": 1990657,
+        "role": 3
+      },
+      "expected": {
+        "salt": "4eadbab9218e0b3612dbc78938916d4c3bf208d4c2360a7aa2cd785c95ee9a42",
+        "rdi": "85a402d2b96c"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py rd_salt/rd_rdi (the same functions reproduce the four literal vectors above). Neither the tests nor the doc pin a role-3 value; the doc gives only the formula.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-010",
+      "description": "Role 3 window ID for day key 05 x 32, node 000102..0f, epoch 200 (VisibleWindowTest)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/VisibleWindowTest.kt",
+        "class": "VisibleWindowTest",
+        "method": "aWindowSpanningABoundaryChangesTheWindowIdAndKeepsTheName",
+        "line": 131
+      },
+      "inputs": {
+        "salt_key": "0505050505050505050505050505050505050505050505050505050505050505",
+        "node_id": "000102030405060708090a0b0c0d0e0f",
+        "epoch": 200,
+        "role": 3
+      },
+      "expected": {
+        "salt": "80b0a8715f41508615ed15eaa7bd811ff4b528b64d2e42ef3f51adb240c3ec2d",
+        "rdi": "ebf7a8bc1ef5"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py rd_salt/rd_rdi. The test asserts only that the two IDs differ and that the name hash is the same in both offers.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-011",
+      "description": "Role 3 window ID for day key 05 x 32, node 000102..0f, epoch 201 (VisibleWindowTest)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/VisibleWindowTest.kt",
+        "class": "VisibleWindowTest",
+        "method": "aWindowSpanningABoundaryChangesTheWindowIdAndKeepsTheName",
+        "line": 131
+      },
+      "inputs": {
+        "salt_key": "0505050505050505050505050505050505050505050505050505050505050505",
+        "node_id": "000102030405060708090a0b0c0d0e0f",
+        "epoch": 201,
+        "role": 3
+      },
+      "expected": {
+        "salt": "6757837c71ad628a1abbabfa0334cea5d94c222b437df70e60afa759c96f0540",
+        "rdi": "cb90c50dc8e6"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py rd_salt/rd_rdi. The test asserts only that the two IDs differ and that the name hash is the same in both offers.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-012",
+      "description": "BDO1 link opening with one entry (role-0 entry of the vector table)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 160,
+        "method": "linkOpeningMatchesTheReviewedVectors"
+      },
+      "inputs": {
+        "entries": [
+          {
+            "rdi": "44e69c0a7a7d",
+            "epoch": 1990656,
+            "role": 0,
+            "salt": "d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+          }
+        ]
+      },
+      "expected": {
+        "bytes": "42444f31010144e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Also docs/PROTOCOL.md line 538 (agrees). 'BDO1' | 01 | count 01 | rdi(6) | epoch u32 001e6000 | role 00 | salt(32). Carried as hop record type 13 (DISCOVERY_OPENING), first record after the link handshake, when both link hellos carry transport bit 3 (0x08)."
+    },
+    {
+      "id": "rotating-ids-013",
+      "description": "BDO1 empty opening (count 0)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 163,
+        "method": "linkOpeningMatchesTheReviewedVectors"
+      },
+      "inputs": {
+        "entries": []
+      },
+      "expected": {
+        "bytes": "42444f310100"
+      },
+      "expected_literal": true,
+      "kind": "roundtrip",
+      "notes": "Also docs/PROTOCOL.md line 539 (agrees)."
+    },
+    {
+      "id": "rotating-ids-014",
+      "description": "BDO1 decode rejects: wrong magic ('X' for 'B')",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "58444f31010144e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-015",
+      "description": "BDO1 decode rejects: unsupported version 2",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "42444f31020144e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-016",
+      "description": "BDO1 decode rejects: count 3 (max 2)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "42444f31010344e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-017",
+      "description": "BDO1 decode rejects: count 2 but length for 1 entry",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "42444f31010244e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-018",
+      "description": "BDO1 decode rejects: truncated by one byte",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "42444f31010144e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e71"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-019",
+      "description": "BDO1 decode rejects: trailing byte",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "42444f31010144e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e716700"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-020",
+      "description": "BDO1 decode rejects: too short (magic only)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 169,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "bytes": "42444f31"
+      },
+      "expected": {
+        "rejected": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Input derived from the one-entry vector by the stated mutation, as the test does.",
+      "inputs_derived": "input bytes derived by the mutation described in notes from a literal vector (the test builds them in code)"
+    },
+    {
+      "id": "rotating-ids-021",
+      "description": "BDO1 encoder refuses three entries (max 2)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 189,
+        "method": "linkOpeningRejectsMalformedRecords"
+      },
+      "inputs": {
+        "entry_count": 3
+      },
+      "expected": {
+        "encode_refused": true
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-022",
+      "description": "Discovery selection check (RV15): the check follows the selected advert, not the hello. Verifier clock = unix 1791590500 (epoch 1990656)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "method": "openingBindsTheSelectedIdToTheAuthenticatedNode",
+        "line": 195
+      },
+      "inputs": {
+        "verifier_unix_seconds": 1791590500,
+        "salt_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "cases": [
+          {
+            "name": "entry opens the selected v5 advert",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "44e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+            ],
+            "result": "PASS"
+          },
+          {
+            "name": "another identity presents the same entry (a relay answering itself)",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f91",
+            "entries": [
+              "44e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+            ],
+            "result": "OPENING_MISMATCH"
+          },
+          {
+            "name": "forged all-zero salt for the right node",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "44e69c0a7a7d001e6000000000000000000000000000000000000000000000000000000000000000000000"
+            ],
+            "result": "OPENING_MISMATCH"
+          },
+          {
+            "name": "role-1 entry for a role-1 selected ID, but role 0 expected",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "bb2d061f6480",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "bb2d061f6480001e600001dcd9349e228e00ceb4a7ec2e7e023fc0c34c507f88e99934897105ca4fae84c0"
+            ],
+            "result": "OPENING_MISMATCH"
+          },
+          {
+            "name": "previous epoch's entry does not open the selected ID",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "47070627136e001e5fff003f5fcad07b0ceab37680b99ea61644b746d13980aa615fed04ddbc2e4879ab98"
+            ],
+            "result": "OPENING_MISMATCH"
+          },
+          {
+            "name": "list of [previous, current] entries: the matching one passes",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "47070627136e001e5fff003f5fcad07b0ceab37680b99ea61644b746d13980aa615fed04ddbc2e4879ab98",
+              "44e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+            ],
+            "result": "PASS"
+          },
+          {
+            "name": "selected v5 advert, no opening received (peer without link bit 3)",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": null,
+            "result": "OPENING_MISSING"
+          },
+          {
+            "name": "selected v5 advert, empty opening",
+            "selected": {
+              "version": 5,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [],
+            "result": "OPENING_MISMATCH"
+          },
+          {
+            "name": "selected v2 advert uses the prefix check even when an opening arrived",
+            "selected": {
+              "version": 2,
+              "node_id_prefix": "a1b2c3d4e5f6",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "44e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+            ],
+            "result": "PASS"
+          },
+          {
+            "name": "selected v2 advert carrying an RDI as its prefix",
+            "selected": {
+              "version": 2,
+              "node_id_prefix": "44e69c0a7a7d",
+              "flags": 65,
+              "capability_summary": 1,
+              "stream_token_hex": "00000000",
+              "route_cost": 0,
+              "sequence": 0,
+              "stream_width": 0,
+              "stream_height": 0,
+              "stream_fps": 0,
+              "stream_bitrate_kbps": 0
+            },
+            "expected_role": 0,
+            "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "entries": [
+              "44e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+            ],
+            "result": "PREFIX_MISMATCH"
+          }
+        ]
+      },
+      "expected": {
+        "results": [
+          "PASS",
+          "OPENING_MISMATCH",
+          "OPENING_MISMATCH",
+          "OPENING_MISMATCH",
+          "OPENING_MISMATCH",
+          "PASS",
+          "OPENING_MISSING",
+          "OPENING_MISMATCH",
+          "PASS",
+          "PREFIX_MISMATCH"
+        ]
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py entry derivation; the PASS/MISMATCH/MISSING outcomes are the test's literal assertions (openingBindsTheSelectedIdToTheAuthenticatedNode and checkFollowsTheSelectedAdvertNotTheHello). Entry = rdi(6)|u32 epoch|role|salt(32) hex.",
+      "kind": "derive",
+      "notes": "Results: PASS, PREFIX_MISMATCH, OPENING_MISSING, OPENING_MISMATCH, OPENING_STALE. An entry opens a selected RDI only if role == expected role, entry.rdi == selected and rdi(node, entry.epoch, role, entry.salt) == selected."
+    },
+    {
+      "id": "rotating-ids-023",
+      "description": "Opening epoch window (RD4): an entry that recomputes but whose epoch is within 2 epochs of the verifier's clock passes; outside it is OPENING_STALE",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "method": "anOpeningOutsideTheEpochWindowIsStaleEvenWhenItRecomputes",
+        "line": 219
+      },
+      "inputs": {
+        "verifier_unix_seconds": 1791590500,
+        "verifier_wall_epoch": 1990656,
+        "peer_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "expected_role": 0,
+        "pass_cases": [
+          {
+            "epoch_offset": -2,
+            "entry": "621883c44774001e5ffe004d2a3e40ec2751bd81cbaadfed111d951f7830ea243633e2b9e64dfe3c3247e8"
+          },
+          {
+            "epoch_offset": -1,
+            "entry": "47070627136e001e5fff003f5fcad07b0ceab37680b99ea61644b746d13980aa615fed04ddbc2e4879ab98"
+          },
+          {
+            "epoch_offset": 0,
+            "entry": "44e69c0a7a7d001e600000d8cbe82b78824c1ba08d0c4eed26502189e19ccccd180e46c4826c5ba47e7167"
+          },
+          {
+            "epoch_offset": 1,
+            "entry": "67aba670e65a001e6001007ece98afad0378297e68c9e2b59c1a1f88448a0c70b86d91f192f65d263a763b"
+          },
+          {
+            "epoch_offset": 2,
+            "entry": "490852c44064001e60020021d4bc879fb371d8b44e9c7479f155902ee2c04eb77c5a5ea791a2cfe0567f17"
+          }
+        ],
+        "stale_cases": [
+          {
+            "epoch_offset": -3,
+            "entry": "4f9a9ed884f2001e5ffd00d2f98b1cdd7ea0286d56d8cac3e9a1937d4fcffb1ebe6726fb609b8ad1a42bbe"
+          },
+          {
+            "epoch_offset": 3,
+            "entry": "5cfa819368a9001e6003000234b2e4691180aba197d15b0ebe036be4e6059afd233bcccea298c3f4f21adb"
+          },
+          {
+            "epoch_offset": 96,
+            "entry": "05da0f454413001e606000f662dcb2381dfd73f1a9c8c58c109194c172d32600121e5956d3e5104b429640"
+          },
+          {
+            "epoch_offset": -96,
+            "entry": "8957500439b0001e5fa00040a4a6e0b97d1599fc810ff40f61964ce446fbeb98652e72a5db060c6f3dd847"
+          },
+          {
+            "epoch_offset": 1000000,
+            "entry": "3663ecc95704002da24000d059c3b32e59444c1a01963143a183b6a5db29db12939622725271e30a95f030"
+          }
+        ]
+      },
+      "expected": {
+        "pass_offsets": [
+          -2,
+          -1,
+          0,
+          1,
+          2
+        ],
+        "stale_offsets": [
+          -3,
+          3,
+          96,
+          -96,
+          1000000
+        ],
+        "epoch_tolerance": 2
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py entry derivation (selected advert = the entry's own RDI, version 5, flags 0x41, summary 1); outcomes are the test's literal assertions",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-024",
+      "description": "Stream route token: logical token 0x12345678 advertised by RDI bb2d061f6480 -> 0x92529fc4 (mask 0x8066c9bc = logical xor token)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 81,
+        "method": "announcementVersion5MatchesTheReviewedVectors"
+      },
+      "inputs": {
+        "logical_token_hex": "12345678",
+        "advertiser_prefix": "bb2d061f6480"
+      },
+      "expected": {
+        "route_token_hex": "92529fc4",
+        "mask_hex": "8066c9bc"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "mask(prefix) = FNV-1a 32-bit (offset 0x811c9dc5, prime 0x01000193) over ASCII 'bluetooth-video-route-v1' || prefix(6), OR 0x80000000; token = logical xor mask; logical = token xor mask. Reproduced in tools/discovery_crypto.py. Same values in docs/PROTOCOL.md line 535 (agrees)."
+    },
+    {
+      "id": "rotating-ids-025",
+      "description": "Stream route token for logical 0x12345678 and advertiser prefix 010203040506",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamDiscoveryTest.kt",
+        "class": "StreamDiscoveryTest",
+        "method": "routeTokensAreHopSpecificButRecoverOneLogicalStream",
+        "line": 43
+      },
+      "inputs": {
+        "logical_token_hex": "12345678",
+        "advertiser_prefix": "010203040506"
+      },
+      "expected": {
+        "route_token_hex": "d344f978",
+        "mask_hex": "c170af00"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py route_mask/route_token. The test asserts only that the two tokens differ, are non-zero and that logicalFrom(token, prefix) == 0x12345678.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-026",
+      "description": "Stream route token for logical 0x12345678 and advertiser prefix 060504030201",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamDiscoveryTest.kt",
+        "class": "StreamDiscoveryTest",
+        "method": "routeTokensAreHopSpecificButRecoverOneLogicalStream",
+        "line": 43
+      },
+      "inputs": {
+        "logical_token_hex": "12345678",
+        "advertiser_prefix": "060504030201"
+      },
+      "expected": {
+        "route_token_hex": "d38d25de",
+        "mask_hex": "c1b973a6"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py route_mask/route_token. The test asserts only that the two tokens differ, are non-zero and that logicalFrom(token, prefix) == 0x12345678.",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-027",
+      "description": "A route token always has bit 31 set (every real route token fits the compact form's implied bit)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CompactDiscoveryAnnouncementTest.kt",
+        "class": "CompactDiscoveryAnnouncementTest",
+        "line": 97,
+        "method": "everyRealRouteTokenFitsBecauseBit31IsAlwaysSet"
+      },
+      "inputs": {
+        "logical_tokens": [
+          1,
+          42,
+          305419896,
+          2147483647
+        ],
+        "advertiser_prefixes": [
+          "010203040506",
+          "a1b2c3d4e5f6"
+        ]
+      },
+      "expected": {
+        "bit31_set": true,
+        "logical_token_recovered": true
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "For these 8 combinations decode(encode(request with route token)).isViewerRequest(token) holds and the stream offer's logical token is recovered."
+    },
+    {
+      "id": "rotating-ids-028",
+      "description": "Recovery-hint key: HKDF-SHA256(media key 40 41 .. 5f, salt 32 x 00, info 'BluetoothVideoMesh/Discovery/Recovery/2', 32 bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 477,
+        "method": "recoveryHintIsKeySeparatedAndBoundToTheRequestsOwnIdAndToken"
+      },
+      "inputs": {
+        "media_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "salt": "0000000000000000000000000000000000000000000000000000000000000000",
+        "info_ascii": "BluetoothVideoMesh/Discovery/Recovery/2"
+      },
+      "expected": {
+        "hint_key": "07eb05087658fd20da5cd7f88afd09a1e4cbd2c92e03066ced3cf16084305c28"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "media_key is the bytes 0x40+i (ByteArray(32){(0x40+it)}), reproduced by tools/discovery_crypto.py. The HKDF info has no NUL; the hint HMAC domain below does. docs/PROTOCOL.md line 546 prints the key abbreviated (07eb0508...305c28; agrees)."
+    },
+    {
+      "id": "rotating-ids-029",
+      "description": "Recovery hint: HMAC-SHA256(hint key, 'BluetoothVideoMesh/Discovery/Recovery/2' || NUL || failed node (16) || u32 logical token || viewer RDI (6) || u32 route token)[0:6] for failed node a1b2c3d4e5f60718293a4b5c6d7e8f90, logical 0x12345678, request RDI 974ae410ea91, route token 0x92529fc4",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 479,
+        "method": "recoveryHintIsKeySeparatedAndBoundToTheRequestsOwnIdAndToken"
+      },
+      "inputs": {
+        "hint_key": "07eb05087658fd20da5cd7f88afd09a1e4cbd2c92e03066ced3cf16084305c28",
+        "failed_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "logical_token_hex": "12345678",
+        "viewer_rdi": "974ae410ea91",
+        "route_token_hex": "92529fc4"
+      },
+      "expected": {
+        "hint": "4d832e9d4dc7"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Also RotatingStreamsTest (RecoveryMatching.hintFor, ViewerRecoveryMemory) and docs/PROTOCOL.md line 548 (agrees)."
+    },
+    {
+      "id": "rotating-ids-030",
+      "description": "Same hint inputs but the viewer's next-epoch request ID 67aba670e65a gives a different hint (a hint copied into another advert matches nothing)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 483,
+        "method": "recoveryHintIsKeySeparatedAndBoundToTheRequestsOwnIdAndToken"
+      },
+      "inputs": {
+        "hint_key": "07eb05087658fd20da5cd7f88afd09a1e4cbd2c92e03066ced3cf16084305c28",
+        "failed_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "logical_token_hex": "12345678",
+        "viewer_rdi": "67aba670e65a",
+        "route_token_hex": "92529fc4"
+      },
+      "expected": {
+        "hint": "f9fa5ad0b780"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-031",
+      "description": "Same inputs with route token 0x92529fc5 (token + 1) give a hint different from 4d832e9d4dc7",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "method": "recoveryHintIsKeySeparatedAndBoundToTheRequestsOwnIdAndToken",
+        "line": 487
+      },
+      "inputs": {
+        "hint_key": "07eb05087658fd20da5cd7f88afd09a1e4cbd2c92e03066ced3cf16084305c28",
+        "failed_node_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "logical_token_hex": "12345678",
+        "viewer_rdi": "974ae410ea91",
+        "route_token_hex": "92529fc5"
+      },
+      "expected": {
+        "hint": "ec67b2b9100a",
+        "differs_from": "4d832e9d4dc7"
+      },
+      "expected_literal": false,
+      "computed_by": "tools/discovery_crypto.py recovery_hint (the test asserts only inequality)",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-032",
+      "description": "Hop record type 13 is DISCOVERY_OPENING and link-hello transport bit 3 (0x08) means 'sends and accepts BDO1 as the first hop record'",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 525,
+        "method": "hopType13IsUnknownUnlessTheOpeningIsExpected"
+      },
+      "inputs": {},
+      "expected": {
+        "hop_record_type": 13,
+        "link_hello_bit": 8
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "rotating-ids-033",
+      "description": "Stranger tarpit: delay before the n-th stranger handshake in an epoch = 0, 31, then doubling: n=1..7 -> 31, 62, 125, 250, 500, 1000, 2000 ms; capped at 30000 ms (n >= 11)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 448,
+        "method": "tarpitGrowsPerSilentStrangerAndResetsEachEpoch"
+      },
+      "inputs": {
+        "probe_counts": [
+          0,
+          1,
+          6,
+          7,
+          10,
+          11,
+          1000
+        ]
+      },
+      "expected": {
+        "delay_ms": [
+          0,
+          31,
+          1000,
+          2000,
+          16000,
+          30000,
+          30000
+        ],
+        "sequence_1_to_7_ms": [
+          31,
+          62,
+          125,
+          250,
+          500,
+          1000,
+          2000
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local policy (RV8): 2^(n-6) s capped at 30 s, count resets each epoch; forgive() on a user-visible action decrements."
+    },
+    {
+      "id": "rotating-ids-034",
+      "description": "Visible-by-handle window end epoch = floor((start + 600 + 900 - 1) / 900): start at the boundary and +300 s end at epoch+1, +301 s ends at epoch+2",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 460,
+        "method": "visibleByHandleWindowEndsAtTheFirstBoundaryTenMinutesLater"
+      },
+      "inputs": {
+        "boundary_unix_seconds": 1791590400,
+        "start_offsets_s": [
+          0,
+          300,
+          301
+        ]
+      },
+      "expected": {
+        "end_epoch": [
+          1990657,
+          1990657,
+          1990658
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Local policy."
+    },
+    {
+      "id": "rotating-ids-035",
+      "description": "Monotonic epoch clock E: from a fresh clock, wall time t0 (2026-10-10T00:00:00Z) gives epoch 1990656 until the wall boundary, then +1 per 900 s boundary (reads at wall t0+500 ms, +899 s, +900.2 s, +1799 s, +1800.1 s)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/RotatingDiscoveryTest.kt",
+        "class": "RotatingDiscoveryTest",
+        "line": 328,
+        "method": "aBackwardClockNeverRepeatsAnEpoch"
+      },
+      "inputs": {
+        "t0_wall_ms": 1791590400000,
+        "reads_wall_ms_after_t0": [
+          500,
+          899000,
+          900200,
+          1799000,
+          1800100
+        ],
+        "reads_elapsed_ms": [
+          0,
+          899500,
+          900700,
+          1799500,
+          1800600
+        ]
+      },
+      "expected": {
+        "epochs": [
+          1990656,
+          1990656,
+          1990657,
+          1990657,
+          1990658
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "E never repeats and never goes down (a rewound wall clock still ticks forward); restarts inside an epoch reuse E. Behavioural; the full state machine is in DiscoveryEpochClock."
+    }
+  ],
+  "description": "Rotating discovery IDs (RDI): HMAC-SHA-256 salt and SHA-256 id derivations, 15-minute epochs, roles 0..3, BDO1 link opening, selection check, route tokens and recovery hints (PROTOCOL 'Experimental rotating discovery IDs'). salt = HMAC-SHA256(key, domain_salt || u32 epoch || u8 role); RDI = SHA-256(domain_id || nodeId(16) || u32 epoch || u8 role || salt)[0:6]; domain_salt/domain_id are ASCII 'BluetoothVideoMesh/Discovery/Salt/1' / '.../Id/1' with a trailing NUL. BDO1 = 'BDO1' | version 1 | count (0..2) | count x entry(rdi(6) | u32 epoch | u8 role | salt(32)). Roles: 0 call offer, 1 stream offer, 2 viewer request, 3 window offer. The vector 'presence key' P is the 32 bytes 00 01 .. 1f (ByteArray(32){it}); the node ID is a1b2c3d4e5f60718293a4b5c6d7e8f90; epoch 1990656 = 0x001e6000 = unix 2026-10-10T00:00:00Z / 900."
+}

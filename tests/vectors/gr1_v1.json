@@ -1,0 +1,230 @@
+{
+  "format": "gr1_v1",
+  "about": "GR1 lost-chunk recovery messages (PROTOCOL 'GATT byte stream and draft lost-chunk recovery'). Integers big-endian; sequences signed 32-bit (compared modulo 2^32). 'valid' entries decode to the given fields (HELLO clamped to 1024 values, 262144 bytes, 2000 ms); every 'ignored' entry must be ignored without failing the link.",
+  "constants": {
+    "historyMs": 2000,
+    "historyValues": 1024,
+    "historyBytes": 262144,
+    "helloRepeatMs": 1000,
+    "roundMs": 250,
+    "maxRequests": 3,
+    "deadlineMs": 1000,
+    "readerNacksPerSecond": 20,
+    "resendsPerSequence": 3,
+    "resendBudgetPercent": 25,
+    "resendFloorBytesPerSecond": 1024,
+    "highIdleMs": 200,
+    "highPerSecond": 2,
+    "maxOutOfRangeNackRanges": 8,
+    "maxRanges": 8,
+    "maxRun": 255,
+    "gapFastFailMs": 1000,
+    "gapFastFailChunks": 128
+  },
+  "nackRangesFitting": [
+    [
+      0,
+      0
+    ],
+    [
+      9,
+      0
+    ],
+    [
+      10,
+      1
+    ],
+    [
+      20,
+      3
+    ],
+    [
+      23,
+      3
+    ],
+    [
+      44,
+      7
+    ],
+    [
+      45,
+      8
+    ],
+    [
+      512,
+      8
+    ]
+  ],
+  "valid": [
+    {
+      "name": "hello_default",
+      "hex": "024752010104000004000007d0",
+      "op": "hello",
+      "historyValues": 1024,
+      "historyBytes": 262144,
+      "historyMs": 2000
+    },
+    {
+      "name": "hello_oversized_clamped",
+      "hex": "0247520101ffffffffffffffff",
+      "op": "hello",
+      "historyValues": 1024,
+      "historyBytes": 262144,
+      "historyMs": 2000
+    },
+    {
+      "name": "hello_small",
+      "hex": "024752010100100000200001f4",
+      "op": "hello",
+      "historyValues": 16,
+      "historyBytes": 8192,
+      "historyMs": 500
+    },
+    {
+      "name": "nack_one_range",
+      "hex": "02475202010000000701",
+      "op": "nack",
+      "ranges": [
+        [
+          7,
+          1
+        ]
+      ]
+    },
+    {
+      "name": "nack_three_ranges_fit_20_bytes",
+      "hex": "02475202030000000a0200000014ffffffffff02",
+      "op": "nack",
+      "ranges": [
+        [
+          10,
+          2
+        ],
+        [
+          20,
+          255
+        ],
+        [
+          -1,
+          2
+        ]
+      ]
+    },
+    {
+      "name": "nack_eight_ranges",
+      "hex": "024752020800000000010000012c0200000258030000038404000004b005000005dc0600000708070000083408",
+      "op": "nack",
+      "ranges": [
+        [
+          0,
+          1
+        ],
+        [
+          300,
+          2
+        ],
+        [
+          600,
+          3
+        ],
+        [
+          900,
+          4
+        ],
+        [
+          1200,
+          5
+        ],
+        [
+          1500,
+          6
+        ],
+        [
+          1800,
+          7
+        ],
+        [
+          2100,
+          8
+        ]
+      ]
+    },
+    {
+      "name": "gone",
+      "hex": "024752030000100003",
+      "op": "gone",
+      "first": 4096,
+      "run": 3
+    },
+    {
+      "name": "high",
+      "hex": "02475204075bcd15",
+      "op": "high",
+      "sequence": 123456789
+    },
+    {
+      "name": "high_wrapped",
+      "hex": "0247520480000000",
+      "op": "high",
+      "sequence": -2147483648
+    }
+  ],
+  "ignored": [
+    {
+      "name": "hello_version_2",
+      "hex": "024752010204000004000007d0"
+    },
+    {
+      "name": "hello_zero_values",
+      "hex": "024752010100000004000007d0"
+    },
+    {
+      "name": "hello_zero_bytes",
+      "hex": "024752010104000000000007d0"
+    },
+    {
+      "name": "hello_short",
+      "hex": "024752010104000004000007"
+    },
+    {
+      "name": "nack_count_0",
+      "hex": "0247520200"
+    },
+    {
+      "name": "nack_count_9",
+      "hex": "0247520209000000000100000001010000000201000000030100000004010000000501000000060100000007010000000801"
+    },
+    {
+      "name": "nack_run_0",
+      "hex": "02475202010000000500"
+    },
+    {
+      "name": "nack_length_mismatch",
+      "hex": "024752020100000005010000000901"
+    },
+    {
+      "name": "gone_run_0",
+      "hex": "024752030000000100"
+    },
+    {
+      "name": "gone_long",
+      "hex": "02475203000000010100"
+    },
+    {
+      "name": "high_short",
+      "hex": "02475204000000"
+    },
+    {
+      "name": "unknown_op_5",
+      "hex": "0247520500000000"
+    },
+    {
+      "name": "prefix_only",
+      "hex": "02475201"
+    },
+    {
+      "name": "not_gr1_type2",
+      "hex": "02ff"
+    }
+  ]
+}

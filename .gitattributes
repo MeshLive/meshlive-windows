@@ -1,0 +1,16 @@
+# Text files are stored and checked out with LF everywhere, so the hashes in sources.lock.json match a fresh
+# checkout on every OS.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# Binary files
+*.png binary
+*.ico binary
+*.ttf binary
+*.ivf binary
+*.msix binary
+*.zip binary
+
+# Preserve frozen upstream source bytes used by sources.lock.json.
+vendor/egui-directx11/shaders/egui.hlsl -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+vendor/egui-directx11/src/texture.rs -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

@@ -1,0 +1,12 @@
+[package]
+name = "egui-directx11"
+version = "0.12.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+build = "build.rs"
+
+[dependencies]
+egui = { version = "=0.33.3", default-features = false }
+log = "0.4.28"
+windows = { version = "=0.62.2", features = ["Win32_Graphics_Dxgi_Common", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11"] }

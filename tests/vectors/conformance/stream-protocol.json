@@ -1,0 +1,2001 @@
+{
+  "schema": "meshlive-conformance-vectors/1",
+  "area": "stream-protocol",
+  "android_commit": "bca3031f8dae52bc149eb55e84f3f3f18f47a623",
+  "vectors": [
+    {
+      "id": "stream-protocol-001",
+      "description": "BTV3 header 1280x720, 24 FPS, codec 3 (AV1), rotation 90, Opus 48000 Hz mono (StreamProtocolTest.writesHeaderInNetworkByteOrder)",
+      "provenance": [
+        {
+          "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+          "class": "StreamProtocolTest",
+          "line": 24,
+          "method": "writesHeaderInNetworkByteOrder"
+        },
+        {
+          "doc": "docs/PROTOCOL.md",
+          "section": "Hop and endpoint records",
+          "line": 153
+        }
+      ],
+      "inputs": {
+        "width": 1280,
+        "height": 720,
+        "fps": 24,
+        "codec_id": 3,
+        "rotation_degrees": 90,
+        "include_audio": true
+      },
+      "expected": {
+        "hex": "42545633050002d018030101bb8001",
+        "length": 15,
+        "fields_read_back": {
+          "magic": "BTV3",
+          "width": 1280,
+          "height": 720,
+          "fps": 24,
+          "codec": 3,
+          "rotation_quarter_turns": 1,
+          "audio_codec": 1,
+          "audio_sample_rate": 48000,
+          "audio_channels": 1
+        }
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py btv3_header()/btv3_packet(): StreamProtocol.writeHeader/writePacket layout (StreamProtocol.kt): header 'BTV3' | width u16 | height u16 | fps u8 | codec u8 | rotation/90 u8 | audioCodec u8 | audioRate u16 | audioChannels u8 (15 bytes); packet length u32 | flags u8 | pts i64 | payload (13-byte header)",
+      "kind": "encode",
+      "notes": "The test reads the fields back in order; it contains no hex literal. Codec ids: 2 = VP9, 3 = AV1 (StreamProtocol.kt). Audio codec 1 = Opus."
+    },
+    {
+      "id": "stream-protocol-002",
+      "description": "BTV3 header 640x360 15 FPS AV1 rotation 270 with Opus, followed by a KEY_FRAME packet pts 123456 payload 01020304 (readsHeaderAndPacketWrittenBySender)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 69,
+        "method": "readsHeaderAndPacketWrittenBySender"
+      },
+      "inputs": {
+        "settings": {
+          "width": 640,
+          "height": 360,
+          "fps": 15
+        },
+        "codec_id": 3,
+        "rotation_degrees": 270,
+        "include_audio": true,
+        "packet": {
+          "flags": 2,
+          "pts_us": 123456,
+          "payload": "01020304"
+        }
+      },
+      "expected": {
+        "header_hex": "42545633028001680f030301bb8001",
+        "packet_hex": "0000000402000000000001e24001020304",
+        "decoded_header": {
+          "width": 640,
+          "height": 360,
+          "fps": 15,
+          "codec_id": 3,
+          "rotation_degrees": 270,
+          "audio_codec": 1,
+          "audio_sample_rate": 48000,
+          "audio_channels": 1
+        }
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py btv3_header()/btv3_packet(): StreamProtocol.writeHeader/writePacket layout (StreamProtocol.kt): header 'BTV3' | width u16 | height u16 | fps u8 | codec u8 | rotation/90 u8 | audioCodec u8 | audioRate u16 | audioChannels u8 (15 bytes); packet length u32 | flags u8 | pts i64 | payload (13-byte header)",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-003",
+      "description": "BTV3 packet: payload 0000000165, flags KEY_FRAME (2), pts 42 us (writesFramedPacket)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 49,
+        "method": "writesFramedPacket"
+      },
+      "inputs": {
+        "flags": 2,
+        "pts_us": 42,
+        "payload": "0000000165"
+      },
+      "expected": {
+        "hex": "0000000502000000000000002a0000000165",
+        "length": 18
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py btv3_header()/btv3_packet(): StreamProtocol.writeHeader/writePacket layout (StreamProtocol.kt): header 'BTV3' | width u16 | height u16 | fps u8 | codec u8 | rotation/90 u8 | audioCodec u8 | audioRate u16 | audioChannels u8 (15 bytes); packet length u32 | flags u8 | pts i64 | payload (13-byte header)",
+      "kind": "encode",
+      "notes": "Test reads back int length=5, flags=2, long 42, then payload."
+    },
+    {
+      "id": "stream-protocol-004",
+      "description": "BTV3 packet with an empty payload and flags 0 (header only, 13 bytes)",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 55
+      },
+      "inputs": {
+        "flags": 0,
+        "pts_us": 0,
+        "payload": ""
+      },
+      "expected": {
+        "hex": "00000000000000000000000000",
+        "length": 13
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py btv3_header()/btv3_packet(): StreamProtocol.writeHeader/writePacket layout (StreamProtocol.kt): header 'BTV3' | width u16 | height u16 | fps u8 | codec u8 | rotation/90 u8 | audioCodec u8 | audioRate u16 | audioChannels u8 (15 bytes); packet length u32 | flags u8 | pts i64 | payload (13-byte header)",
+      "kind": "encode",
+      "notes": "readPacket accepts size 0..MAX_PAYLOAD_BYTES (4 MiB). Not asserted by a test."
+    },
+    {
+      "id": "stream-protocol-005",
+      "description": "Removed legacy header 'BTV1' (0x0280 x 0x0168, 15 FPS, VP9) is rejected: Unsupported stream header BTV1",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 98,
+        "method": "rejectsRemovedLegacyHeader"
+      },
+      "inputs": {
+        "hex": "42545631028001680f02"
+      },
+      "expected": {
+        "result": "reject",
+        "error": "IllegalArgumentException",
+        "message": "Unsupported stream header BTV1"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Bytes spelled in the test as chars/hex: 'B','T','V','1',0x02,0x80,0x01,0x68,15,CODEC_VP9(2). Message text from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-006",
+      "description": "BTV3 header with width 0 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "42545633000001680f020000000000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "width 1..4096, height 1..4096, fps 1..120"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-007",
+      "description": "BTV3 header with fps 0 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "425456330280016800020000000000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "fps 1..120"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-008",
+      "description": "BTV3 header with fps 121 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "425456330280016879020000000000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "fps 1..120"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-009",
+      "description": "BTV3 header with codec id 1 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "42545633028001680f010000000000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "codec must be 2 (VP9) or 3 (AV1)"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-010",
+      "description": "BTV3 header with rotation quarter-turns 4 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "42545633028001680f020400000000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "rotation 0..3"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-011",
+      "description": "BTV3 header with audio codec Opus with sample rate 44100 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "42545633028001680f020001ac4401",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "audio must be none/0/0 or Opus/48000/1"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-012",
+      "description": "BTV3 header with audio codec none but sample rate 48000 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "42545633028001680f020000bb8000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "audio must be none/0/0 or Opus/48000/1"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-013",
+      "description": "BTV3 header with unknown magic BTV2 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 211
+      },
+      "inputs": {
+        "hex": "42545632028001680f020000000000",
+        "base": "BTV3 640x360 15 FPS VP9 rotation 0 no audio = 42545633028001680f020000000000"
+      },
+      "expected": {
+        "result": "reject",
+        "reason": "only BTV3 (and BTL1 when allowed) accepted"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.readHeader.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-014",
+      "description": "Display rotation packet: payload 01 = 90 degrees (flag DISPLAY_ROTATION 4, pts 0)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 109,
+        "method": "carriesDisplayRotationChangesWithoutVideoReencoding"
+      },
+      "inputs": {
+        "rotation_degrees": 90
+      },
+      "expected": {
+        "payload_hex": "01",
+        "packet_flags": 4,
+        "decoded_degrees": 90,
+        "valid_payloads": {
+          "00": 0,
+          "01": 90,
+          "02": 180,
+          "03": 270
+        }
+      },
+      "expected_literal": false,
+      "computed_by": "StreamProtocol.encodeDisplayRotation: one byte = degrees/90 (StreamProtocol.kt)",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-015",
+      "description": "Display rotation payload 04 (quarter turns > 3) or a payload that is not exactly one byte is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 183
+      },
+      "inputs": {
+        "payloads": [
+          "04",
+          "",
+          "0100"
+        ],
+        "packet_flags": 4
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.decodeDisplayRotation.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-016",
+      "description": "Paired Opus access units (BTA1): first 010203 pts 1000000, second 0405 pts 1020000 -> one packet flags AUDIO|AUDIO_PAIR (72), pts 1000000",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 128,
+        "method": "pairsTwoOpusAccessUnitsWithoutChangingTheirTimingOrBytes"
+      },
+      "inputs": {
+        "first": {
+          "flags": 8,
+          "pts_us": 1000000,
+          "payload": "010203"
+        },
+        "second": {
+          "flags": 8,
+          "pts_us": 1020000,
+          "payload": "0405"
+        }
+      },
+      "expected": {
+        "flags": 72,
+        "pts_us": 1000000,
+        "payload_hex": "4254413100004e20000301020300020405",
+        "split_gives": [
+          {
+            "flags": 8,
+            "pts_us": 1000000,
+            "payload": "010203"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1020000,
+            "payload": "0405"
+          }
+        ]
+      },
+      "expected_literal": false,
+      "computed_by": "StreamProtocol.pairAudioPackets layout: 'BTA1' | delta_us i32 BE | len1 u16 | payload1 | len2 u16 | payload2 (StreamProtocol.kt)",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-017",
+      "description": "Batched Opus access units (BTA2): 20 units pts 1000000 + i*20000, payload bytes [i, i+1] -> flags 72, 165-byte payload",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 145,
+        "method": "batchesTwentyOpusAccessUnitsWithoutChangingTheirTimingOrBytes"
+      },
+      "inputs": {
+        "units": [
+          {
+            "flags": 8,
+            "pts_us": 1000000,
+            "payload": "0001"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1020000,
+            "payload": "0102"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1040000,
+            "payload": "0203"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1060000,
+            "payload": "0304"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1080000,
+            "payload": "0405"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1100000,
+            "payload": "0506"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1120000,
+            "payload": "0607"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1140000,
+            "payload": "0708"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1160000,
+            "payload": "0809"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1180000,
+            "payload": "090a"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1200000,
+            "payload": "0a0b"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1220000,
+            "payload": "0b0c"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1240000,
+            "payload": "0c0d"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1260000,
+            "payload": "0d0e"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1280000,
+            "payload": "0e0f"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1300000,
+            "payload": "0f10"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1320000,
+            "payload": "1011"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1340000,
+            "payload": "1112"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1360000,
+            "payload": "1213"
+          },
+          {
+            "flags": 8,
+            "pts_us": 1380000,
+            "payload": "1314"
+          }
+        ]
+      },
+      "expected": {
+        "flags": 72,
+        "pts_us": 1000000,
+        "payload_hex": "4254413214000000000002000100004e200002010200009c40000202030000ea60000203040001388000020405000186a0000205060001d4c000020607000222e00002070800027100000208090002bf200002090a00030d4000020a0b00035b6000020b0c0003a98000020c0d0003f7a000020d0e000445c000020e0f000493e000020f100004e20000021011000530200002111200057e40000212130005cc6000021314",
+        "payload_len": 165,
+        "split_gives_20_units_identical": true
+      },
+      "expected_literal": false,
+      "computed_by": "StreamProtocol.batchAudioPackets layout: 'BTA2' | count u8 (3..20) | count x (delta_us from first i32 BE | len u16 | payload) (StreamProtocol.kt)",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-018",
+      "description": "Pairing refuses a first packet whose flags are not exactly AUDIO (flags 0)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 172,
+        "method": "rejectsTruncatedOrNonAudioPairs"
+      },
+      "inputs": {
+        "first": {
+          "flags": 0,
+          "pts_us": 1000000,
+          "payload": "010203"
+        },
+        "second": {
+          "flags": 8,
+          "pts_us": 1020000,
+          "payload": "0405"
+        }
+      },
+      "expected": {
+        "result": "reject",
+        "error": "IllegalArgumentException"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-019",
+      "description": "Splitting a paired-audio payload with its last byte removed is rejected",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 175,
+        "method": "rejectsTruncatedOrNonAudioPairs"
+      },
+      "inputs": {
+        "payload_hex": "4254413100004e200003010203000204",
+        "flags": 72,
+        "base": "pair vector above minus last byte"
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-020",
+      "description": "Paired/batched audio payload: batch count 2 (below 3) is rejected by splitAudioPair (flags 72)",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 345
+      },
+      "inputs": {
+        "payload_hex": "4254413202000000000002000100004e2000020102",
+        "flags": 72
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.splitAudioPair (count 3..20, delta 0..1000000 us, no trailing data).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-021",
+      "description": "Paired/batched audio payload: batch count 21 (above 20) is rejected by splitAudioPair (flags 72)",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 345
+      },
+      "inputs": {
+        "payload_hex": "4254413215000000000002000100004e200002010200009c40000202030000ea60000203040001388000020405000186a0000205060001d4c000020607000222e00002070800027100000208090002bf200002090a00030d4000020a0b00035b6000020b0c0003a98000020c0d0003f7a000020d0e000445c000020e0f000493e000020f100004e20000021011000530200002111200057e40000212130005cc6000021314",
+        "flags": 72
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.splitAudioPair (count 3..20, delta 0..1000000 us, no trailing data).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-022",
+      "description": "Paired/batched audio payload: unknown magic BTA3 is rejected by splitAudioPair (flags 72)",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 345
+      },
+      "inputs": {
+        "payload_hex": "4254413300004e20000301020300020405",
+        "flags": 72
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.splitAudioPair (count 3..20, delta 0..1000000 us, no trailing data).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-023",
+      "description": "Paired/batched audio payload: pair with trailing byte is rejected by splitAudioPair (flags 72)",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 345
+      },
+      "inputs": {
+        "payload_hex": "4254413100004e2000030102030002040500",
+        "flags": 72
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.splitAudioPair (count 3..20, delta 0..1000000 us, no trailing data).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-024",
+      "description": "Paired/batched audio payload: pair with negative timestamp delta is rejected by splitAudioPair (flags 72)",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/StreamProtocol.kt",
+        "class": "StreamProtocol",
+        "line": 345
+      },
+      "inputs": {
+        "payload_hex": "42544131ffffffff000301020300020405",
+        "flags": 72
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from StreamProtocol.splitAudioPair (count 3..20, delta 0..1000000 us, no trailing data).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-025",
+      "description": "Debug integrity: KEY_FRAME packet pts 456000 payload 04080f10172a -> flags 18 (KEY_FRAME|DEBUG_INTEGRITY), payload = SHA-256(payload) || payload",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 184,
+        "method": "provesAndRestoresExactEncodedAccessUnit"
+      },
+      "inputs": {
+        "flags": 2,
+        "pts_us": 456000,
+        "payload": "04080f10172a"
+      },
+      "expected": {
+        "flags": 18,
+        "payload_hex": "c115911b7d3a28db2bfaadfb974320fc3a2361260c0187d26c409fc099a7ed1804080f10172a",
+        "restored": {
+          "flags": 2,
+          "payload": "04080f10172a",
+          "verified": true
+        }
+      },
+      "expected_literal": false,
+      "computed_by": "hashlib.sha256; StreamProtocol.attachDebugIntegrity (digest || payload, flag 0x10)",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-026",
+      "description": "Debug-integrity packet whose last payload byte changed (4 -> 5) fails verification",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/StreamProtocolTest.kt",
+        "class": "StreamProtocolTest",
+        "line": 201,
+        "method": "rejectsChangedEncodedAccessUnit"
+      },
+      "inputs": {
+        "flags": 16,
+        "pts_us": 123000,
+        "payload_hex": "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a01020305",
+        "base": "attachDebugIntegrity(Packet(0, 123000, 01020304)) with last byte := 05"
+      },
+      "expected": {
+        "result": "reject",
+        "error": "IllegalArgumentException",
+        "message": "Encoded access unit changed between sender and receiver"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-027",
+      "description": "Inner media flags KEY_FRAME|DISCONTINUITY|DEBUG_INTEGRITY (2|32|16 = 50) become outer mesh flags 2 (KEY_FRAME only); the ENDED lifecycle record has mesh CONTROL (16) and TERMINAL (32)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ForwardedStreamSecurityTest.kt",
+        "class": "ForwardedStreamSecurityTest",
+        "line": 43,
+        "method": "mediaRecoveryAndIntegrityFlagsNeverBecomeMeshLifecycleFlags"
+      },
+      "inputs": {
+        "inner_flags": 50
+      },
+      "expected": {
+        "outer_mesh_flags": 2,
+        "outer_isControl": false,
+        "outer_terminal_bit": 0,
+        "inner_flags_in_authenticated_record": 50,
+        "ended_record_mesh_flags_include": [
+          16,
+          32
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "meshPacketFlags(f) = f & ~(0x10|0x20) (EndToEndVideoSecurity.kt line ~287); PROTOCOL 'Mesh routing and inner media flags use separate namespaces'. Mesh flag bits: 1 codec config, 2 key frame, 8 audio, 16 control, 32 terminal, 128 discardable."
+    },
+    {
+      "id": "stream-protocol-028",
+      "description": "Audio pair batch inner flags 8|64 = 72 map to mesh flags 72 (the mirrored pair bit is kept)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/AudioLiveProtocolTest.kt",
+        "class": "AudioLiveProtocolTest",
+        "line": 594,
+        "method": "shedPredicatesAreExactAndNeverMixTheFlagNamespaces"
+      },
+      "inputs": {
+        "inner_flags": 72
+      },
+      "expected": {
+        "mesh_flags": 72
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-029",
+      "description": "BFG1 forwarded-stream grant: source node id = bytes 01..10, stream ID c7da2c06-e0de-4d7b-98ed-4916c2f208a3, media key = bytes 09..28 (i+9) (76 bytes)",
+      "provenance": [
+        {
+          "file": "app/src/test/java/com/example/bluetoothtest/ForwardedStreamSecurityTest.kt",
+          "class": "ForwardedStreamSecurityTest",
+          "line": 55,
+          "method": "forwardedGrantRoundTripsAndRejectsTrailingData"
+        },
+        {
+          "doc": "docs/PROTOCOL.md",
+          "section": "Security layers and participants",
+          "line": 37
+        }
+      ],
+      "inputs": {
+        "source_node_id_recipe": "node(1)[i] = (1 + i) & 0xff for i in 0..15",
+        "source_node_id": "0102030405060708090a0b0c0d0e0f10",
+        "stream_id": "c7da2c06-e0de-4d7b-98ed-4916c2f208a3",
+        "media_key_recipe": "key[i] = (i + 9) & 0xff for i in 0..31"
+      },
+      "expected": {
+        "hex": "424647310102030405060708090a0b0c0d0e0f10c7da2c06e0de4d7b98ed4916c2f208a3090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728",
+        "length": 76
+      },
+      "expected_literal": false,
+      "computed_by": "ForwardedStreamGrantCodec layout (ForwardedStreamSecurity.kt): 'BFG1' | source node ID(16) | streamId msb u64 | lsb u64 | key(32). Sealed as BME1 type 7 (GROUP_KEY) under the parent-child endpoint session.",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-030",
+      "description": "BFG1 grant with one trailing byte is rejected (exact length 76)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/ForwardedStreamSecurityTest.kt",
+        "class": "ForwardedStreamSecurityTest",
+        "line": 66,
+        "method": "forwardedGrantRoundTripsAndRejectsTrailingData"
+      },
+      "inputs": {
+        "hex": "424647310102030405060708090a0b0c0d0e0f10c7da2c06e0de4d7b98ed4916c2f208a3090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526272800"
+      },
+      "expected": {
+        "result": "reject",
+        "error": "IllegalArgumentException"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-031",
+      "description": "BFG1 grant with wrong magic or length 75 is rejected",
+      "provenance": {
+        "file": "app/src/main/java/com/example/bluetoothtest/ForwardedStreamSecurity.kt",
+        "class": "ForwardedStreamSecurity",
+        "line": 35
+      },
+      "inputs": {
+        "hexes": [
+          "424647320102030405060708090a0b0c0d0e0f10c7da2c06e0de4d7b98ed4916c2f208a3090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728",
+          "424647310102030405060708090a0b0c0d0e0f10c7da2c06e0de4d7b98ed4916c2f208a3090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627"
+        ]
+      },
+      "expected": {
+        "result": "reject"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Not covered by a JVM test; rule from ForwardedStreamGrantCodec.decode.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-032",
+      "description": "BMG1 group relay control RECEIVER_CONTROL (type 5), receiver node 03..12, payload 040506",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/GroupBroadcastSecurityTest.kt",
+        "class": "GroupBroadcastSecurityTest",
+        "line": 15,
+        "method": "controlAndGroupKeyCodecsRoundTripWithoutTrailingData"
+      },
+      "inputs": {
+        "type": 5,
+        "receiver_node_id": "030405060708090a0b0c0d0e0f101112",
+        "payload": "040506"
+      },
+      "expected": {
+        "hex": "424d473105030405060708090a0b0c0d0e0f10111200000003040506",
+        "length": 28
+      },
+      "expected_literal": false,
+      "computed_by": "GroupRelayControlCodec layout (GroupBroadcastSecurity.kt): 'BMG1' | type u8 | receiver node ID(16) | payload length u32 | payload (payload max 4096). Types: JOIN 1, SOURCE_HELLO 2, RECEIVER_HELLO 3, WRAPPED_KEY 4, RECEIVER_CONTROL 5, RECEIVER_LEFT 6",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-033",
+      "description": "BMG1 RECEIVER_LEFT (type 6), same receiver, empty payload (25 bytes)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/GroupBroadcastSecurityTest.kt",
+        "class": "GroupBroadcastSecurityTest",
+        "line": 27,
+        "method": "controlAndGroupKeyCodecsRoundTripWithoutTrailingData"
+      },
+      "inputs": {
+        "type": 6,
+        "receiver_node_id": "030405060708090a0b0c0d0e0f101112",
+        "payload": ""
+      },
+      "expected": {
+        "hex": "424d473106030405060708090a0b0c0d0e0f10111200000000",
+        "length": 25
+      },
+      "expected_literal": false,
+      "computed_by": "GroupRelayControlCodec layout, see previous vector",
+      "kind": "roundtrip",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-034",
+      "description": "BMG1 control with one trailing byte is rejected (Truncated or trailing group control data)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/GroupBroadcastSecurityTest.kt",
+        "class": "GroupBroadcastSecurityTest",
+        "line": 25,
+        "method": "controlAndGroupKeyCodecsRoundTripWithoutTrailingData"
+      },
+      "inputs": {
+        "hex": "424d473105030405060708090a0b0c0d0e0f1011120000000304050600"
+      },
+      "expected": {
+        "result": "reject",
+        "error": "IllegalArgumentException"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-035",
+      "description": "BGK1 broadcast group key record: 'BGK1' | streamId (16) | epoch u64 BE (> 0) | key (32) = 60 bytes; epoch 7 and key bytes 00..1f are the test's inputs but its stream ID is random, so no byte literal exists",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/GroupBroadcastSecurityTest.kt",
+        "class": "GroupBroadcastSecurityTest",
+        "line": 35,
+        "method": "controlAndGroupKeyCodecsRoundTripWithoutTrailingData"
+      },
+      "inputs": {
+        "epoch": 7,
+        "key_recipe": "key[i] = i for i in 0..31",
+        "stream_id": "random in the test"
+      },
+      "expected": {
+        "length": 60,
+        "layout": "magic BGK1 (4) | streamId msb u64 | lsb u64 | epoch u64 BE | key (32)",
+        "epoch_must_be_positive": true,
+        "key_must_be_32_bytes": true
+      },
+      "expected_literal": false,
+      "kind": "roundtrip",
+      "notes": "Layout from BroadcastGroupKeyCodec (GroupBroadcastSecurity.kt line ~70). Gap: no fixed byte vector for BGK1 exists in the tests because the stream ID is random."
+    },
+    {
+      "id": "stream-protocol-036",
+      "description": "Group key distribution: the same BGK1 plaintext sealed under two different endpoint keys yields different records; each opens only under its own key (endpoint keys 32x01 and 32x02)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/GroupBroadcastSecurityTest.kt",
+        "class": "GroupBroadcastSecurityTest",
+        "line": 69,
+        "method": "groupKeyIsWrappedSeparatelyForEachAuthenticatedReceiver"
+      },
+      "inputs": {
+        "endpoint_key_1": "0101010101010101010101010101010101010101010101010101010101010101",
+        "endpoint_key_2": "0202020202020202020202020202020202020202020202020202020202020202",
+        "content_type": 7,
+        "packet_flags": 0
+      },
+      "expected": {
+        "records_differ": true,
+        "opens_under_own_key": true,
+        "opens_under_other_key": false
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Keys are ByteArray fills (32 x 1 and 32 x 2). A fixed key lets a port compute the record, but the BME1 record here contains the random-UUID plaintext, so there is no byte literal.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-037",
+      "description": "Identical group media ciphertext (BME1 type 2, flags KEY_FRAME, payload 090807, key bytes (i*7)&0xff) opens independently at two receivers",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/GroupBroadcastSecurityTest.kt",
+        "class": "GroupBroadcastSecurityTest",
+        "line": 44,
+        "method": "identicalGroupCiphertextOpensIndependentlyAtTwoReceivers"
+      },
+      "inputs": {
+        "key_recipe": "key[i] = (i*7)&0xff",
+        "content_type": 2,
+        "flags": 2,
+        "plaintext": "090807"
+      },
+      "expected": {
+        "both_receivers_open": true,
+        "payload": "090807"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Behavioural; the record bytes depend on the first-sequence nonce (see framing.json for the BME1 AES-GCM construction).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-038",
+      "description": "BME1 lifecycle payload is exactly one byte: LIVE=1, PAUSED=2, ENDED=3; keyframe request (type 5) and terminal acknowledgement (type 8) have empty payloads; non-media content must have zero packet flags",
+      "provenance": {
+        "doc": "docs/PROTOCOL.md",
+        "section": "Hop and endpoint records",
+        "line": 151
+      },
+      "inputs": {
+        "content_types": {
+          "STREAM_HEADER": 1,
+          "MEDIA_PACKET": 2,
+          "STREAM_STATE": 4,
+          "KEY_FRAME_REQUEST": 5,
+          "PRIVATE_CALL_SIGNAL": 6,
+          "GROUP_KEY": 7,
+          "STREAM_END_ACK": 8,
+          "VIDEO_FRAGMENT": 9,
+          "LABELS": 10,
+          "DISCOVERY": 11
+        }
+      },
+      "expected": {
+        "lifecycle": {
+          "LIVE": 1,
+          "PAUSED": 2,
+          "ENDED": 3
+        },
+        "live_media_state_extra": {
+          "LIVE_MUTED": 4,
+          "LIVE_CAMERA_OFF": 5,
+          "LIVE_MUTED_CAMERA_OFF": 6
+        }
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Content type values from EndToEndContentType (EndToEndVideoSecurity.kt line 13); 9, 10 and 11 are opt-in types. Values 4..6 of the lifecycle byte are the Experimental live media state."
+    },
+    {
+      "id": "stream-protocol-039",
+      "description": "Stream packet flag bits (inner BTV3 namespace)",
+      "provenance": {
+        "doc": "docs/PROTOCOL.md",
+        "section": "Hop and endpoint records",
+        "line": 155
+      },
+      "inputs": {},
+      "expected": {
+        "CODEC_CONFIG": 1,
+        "KEY_FRAME": 2,
+        "DISPLAY_ROTATION": 4,
+        "AUDIO": 8,
+        "DEBUG_INTEGRITY": 16,
+        "DISCONTINUITY": 32,
+        "AUDIO_PAIR": 64,
+        "DISCARDABLE": 128,
+        "codec_ids": {
+          "VP9": 2,
+          "AV1": 3
+        },
+        "audio_codec_ids": {
+          "NONE": 0,
+          "OPUS": 1
+        },
+        "max_payload_bytes": 4194304
+      },
+      "expected_literal": false,
+      "kind": "decode",
+      "notes": "Values from StreamProtocol.kt lines 55-76 (PROTOCOL.md confirms bit 7 = 128 discardable and 'bit 5 FLAG_DISCONTINUITY'); the doc does not tabulate the others."
+    },
+    {
+      "id": "stream-protocol-040",
+      "description": "VP9 uncompressed header of real encoder output (m31 keyframe): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 20,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "824983420027f01df41438241c18dc3bfdfeff7fbfdfefea3187221872118320"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": true,
+        "base_q_idx": 110,
+        "width": 640,
+        "height": 480,
+        "error_resilient": false
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-041",
+      "description": "VP9 uncompressed header of real encoder output (m31 frame 74): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 21,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "863fc002181460068faf0040201c180282c41620b100084208882088c2109021"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": false,
+        "base_q_idx": 13
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-042",
+      "description": "VP9 uncompressed header of real encoder output (m31 scene cut 75): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 22,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "863fc002181460060ff30040200802824412209100084208882088c210902100"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": false,
+        "base_q_idx": 12,
+        "label": "inter"
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-043",
+      "description": "VP9 uncompressed header of real encoder output (m31 frame 80): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 23,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "863fc00218fc607f8e1d008840239c99d28c4442211100080040020010000001"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": false,
+        "base_q_idx": 255
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-044",
+      "description": "VP9 uncompressed header of real encoder output (s24 keyframe): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 24,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "824983426027f01df414301b877fbfdfeff7fbfdfd4630e4430e423064002108"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": true,
+        "base_q_idx": 110,
+        "width": 640,
+        "height": 480
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-045",
+      "description": "VP9 uncompressed header of real encoder output (s24 scene cut 75): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 25,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "863fc002182c602f0fab02a2389b6f228c6148860c8444002108422086230882"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": false,
+        "base_q_idx": 94
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-046",
+      "description": "VP9 uncompressed header of real encoder output (asus keyframe): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 26,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "834983420027f01df068e0907063f00016205f7effc2fff0fe2fba3f7f47eff9"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": true,
+        "base_q_idx": 126,
+        "width": 640,
+        "height": 480,
+        "error_resilient": true
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-047",
+      "description": "VP9 uncompressed header of real encoder output (asus scene cut 75): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 27,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "8701024b081c120e0c320005fc7fbc5ffabfbbe6fce7af673da7f5074ede9f03"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": false,
+        "base_q_idx": 50
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-048",
+      "description": "VP9 uncompressed header of real encoder output (asus frame 77): first 32 bytes",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 28,
+        "method": "realHardwareAndSoftwareEncoderHeadersGiveTheirQuantizer"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "870102493f1c120e0cfd0001787f45ffd1fa3ee3797faefdbf43ebf167b0e2af"
+      },
+      "expected": {
+        "show_frame": true,
+        "key_frame": false,
+        "base_q_idx": 253
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "Frame sizes in the test (bytes field) are not needed to parse. VP9 profile-0 uncompressed header; q_idx is base_q_idx."
+    },
+    {
+      "id": "stream-protocol-049",
+      "description": "VP9 header parse returns null (rejects): 6 bytes of an inter header (truncated)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 68,
+        "method": "truncatedOrForeignDataIsRejected"
+      },
+      "inputs": {
+        "hex": "863fc0021814"
+      },
+      "expected": {
+        "result": "reject",
+        "parse": null
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Parser returns null, not an exception.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-050",
+      "description": "VP9 header parse returns null (rejects): empty input",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 69,
+        "method": "truncatedOrForeignDataIsRejected"
+      },
+      "inputs": {
+        "hex": ""
+      },
+      "expected": {
+        "result": "reject",
+        "parse": null
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Parser returns null, not an exception.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-051",
+      "description": "VP9 header parse returns null (rejects): AV1-looking bytes 12 00 0a 0b (no 0b10 frame marker)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 71,
+        "method": "truncatedOrForeignDataIsRejected"
+      },
+      "inputs": {
+        "hex": "12000a0b"
+      },
+      "expected": {
+        "result": "reject",
+        "parse": null
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Parser returns null, not an exception.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-052",
+      "description": "VP9 header parse returns null (rejects): m31 keyframe with sync-code byte 1 changed from 0x49 to 0x48",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 73,
+        "method": "truncatedOrForeignDataIsRejected"
+      },
+      "inputs": {
+        "hex": "824883420027f01df41438241c18dc3bfdfeff7fbfdfefea3187221872118320"
+      },
+      "expected": {
+        "result": "reject",
+        "parse": null
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "Parser returns null, not an exception.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-053",
+      "description": "Synthetic VP9 inter frame (shown, q_idx 77, loop-filter deltas): parses to base_q_idx 77, refresh_frame_flags 0x05",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 79,
+        "method": "syntheticHeadersCoverLoopFilterDeltasHiddenFramesAndProfiles"
+      },
+      "inputs": {
+        "hex": "86014092e645c14041c1a29340",
+        "recipe": "interFrame(show=true, qIdx=77, withDeltas=true)"
+      },
+      "expected": {
+        "base_q_idx": 77,
+        "refresh_frame_flags": 5
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_inter()/vp9_key_profile(): port of Vp9FrameHeaderTest.BitWriter (MSB-first bits, zero padded to a multiple of 8 and at least 64 bits)",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-054",
+      "description": "Synthetic VP9 hidden inter frame (show_frame 0, intra_only bit present, q_idx 30, no deltas): show_frame false, base_q_idx 30",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 84,
+        "method": "syntheticHeadersCoverLoopFilterDeltasHiddenFramesAndProfiles"
+      },
+      "inputs": {
+        "hex": "8400a04973220f00",
+        "recipe": "interFrame(show=false, qIdx=30, withDeltas=false)"
+      },
+      "expected": {
+        "show_frame": false,
+        "base_q_idx": 30
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_inter()/vp9_key_profile(): port of Vp9FrameHeaderTest.BitWriter (MSB-first bits, zero padded to a multiple of 8 and at least 64 bits)",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-055",
+      "description": "Synthetic VP9 profile 1 keyframe 352x288 q_idx 200 (extra subsampling bits)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 89,
+        "method": "syntheticHeadersCoverLoopFilterDeltasHiddenFramesAndProfiles"
+      },
+      "inputs": {
+        "hex": "a24983424802be023ec917050107068ac8",
+        "recipe": "keyFrame(profile=1, width=352, height=288, qIdx=200)"
+      },
+      "expected": {
+        "key_frame": true,
+        "width": 352,
+        "height": 288,
+        "base_q_idx": 200
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_inter()/vp9_key_profile(): port of Vp9FrameHeaderTest.BitWriter (MSB-first bits, zero padded to a multiple of 8 and at least 64 bits)",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-056",
+      "description": "VP9 show_existing_frame header (marker 10, profile 0, show_existing 1, index 3): show_existing_frame true, base_q_idx -1 (no quantizer)",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 96,
+        "method": "syntheticHeadersCoverLoopFilterDeltasHiddenFramesAndProfiles"
+      },
+      "inputs": {
+        "hex": "8b00000000000000"
+      },
+      "expected": {
+        "show_existing_frame": true,
+        "base_q_idx": -1
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_inter()/vp9_key_profile(): port of Vp9FrameHeaderTest.BitWriter (MSB-first bits, zero padded to a multiple of 8 and at least 64 bits)",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-057",
+      "description": "VP9 superframe (hidden q30 + shown q140 + 4-byte index with one-byte sizes): frames = [(0, n1), (n1, n2)], access unit reports the shown frame q_idx 140",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Vp9FrameHeaderTest.kt",
+        "class": "Vp9FrameHeaderTest",
+        "line": 106,
+        "method": "superframesReportTheShownFrame"
+      },
+      "inputs": {
+        "hex": "8400a04973220f0086014092e6448c00c10808c1",
+        "hidden_len": 8,
+        "shown_len": 8
+      },
+      "expected": {
+        "frames": [
+          [
+            0,
+            8
+          ],
+          [
+            8,
+            8
+          ]
+        ],
+        "access_unit_base_q_idx": 140,
+        "without_valid_index_whole_buffer_is_one_frame": true,
+        "bogus_index_marker_c1_01_01_c1_gives_one_frame": true
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_inter()/vp9_key_profile(): port of Vp9FrameHeaderTest.BitWriter (MSB-first bits, zero padded to a multiple of 8 and at least 64 bits)",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-058",
+      "description": "VP9 keyframe coded size read from the first 32 bytes of a real keyframe = 640x480",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 14,
+        "method": "vp9KeyFrameFromRealEncodersGivesItsCodedSize"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "824983420027f01df41438241c18dc3bfdfeff7fbfdfefea3187221872118320",
+        "codec": "VP9"
+      },
+      "expected": {
+        "width": 640,
+        "height": 480
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-059",
+      "description": "VP9 keyframe coded size read from the first 32 bytes of a real keyframe = 640x480",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 15,
+        "method": "vp9KeyFrameFromRealEncodersGivesItsCodedSize"
+      },
+      "inputs": {
+        "first_32_bytes_hex": "824983426027f01df414301b877fbfdfeff7fbfdfd4630e4430e423064002108",
+        "codec": "VP9"
+      },
+      "expected": {
+        "width": 640,
+        "height": 480
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-060",
+      "description": "Synthetic VP9 keyframe 426x240 (SizeChangeFixtures.vp9KeyFrame: header + 200 filler bytes (i*7)&0xff) reports coded size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 23,
+        "method": "vp9KeyFramesOfEveryRungReportTheirOwnSize"
+      },
+      "inputs": {
+        "codec": "VP9",
+        "hex": "82498342401a900ef648878000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71"
+      },
+      "expected": {
+        "width": 426,
+        "height": 240
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_key_sizechange(): port of SizeChangeFixtures.vp9KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-061",
+      "description": "Synthetic VP9 keyframe 640x360 (SizeChangeFixtures.vp9KeyFrame: header + 200 filler bytes (i*7)&0xff) reports coded size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 23,
+        "method": "vp9KeyFramesOfEveryRungReportTheirOwnSize"
+      },
+      "inputs": {
+        "codec": "VP9",
+        "hex": "824983424027f0167648878000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71"
+      },
+      "expected": {
+        "width": 640,
+        "height": 360
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_key_sizechange(): port of SizeChangeFixtures.vp9KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-062",
+      "description": "Synthetic VP9 keyframe 854x480 (SizeChangeFixtures.vp9KeyFrame: header + 200 filler bytes (i*7)&0xff) reports coded size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 23,
+        "method": "vp9KeyFramesOfEveryRungReportTheirOwnSize"
+      },
+      "inputs": {
+        "codec": "VP9",
+        "hex": "824983424035501df648878000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71"
+      },
+      "expected": {
+        "width": 854,
+        "height": 480
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_key_sizechange(): port of SizeChangeFixtures.vp9KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-063",
+      "description": "Synthetic VP9 keyframe 960x540 (SizeChangeFixtures.vp9KeyFrame: header + 200 filler bytes (i*7)&0xff) reports coded size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 23,
+        "method": "vp9KeyFramesOfEveryRungReportTheirOwnSize"
+      },
+      "inputs": {
+        "codec": "VP9",
+        "hex": "82498342403bf021b648878000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71"
+      },
+      "expected": {
+        "width": 960,
+        "height": 540
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_key_sizechange(): port of SizeChangeFixtures.vp9KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-064",
+      "description": "Synthetic VP9 keyframe 1280x720 (SizeChangeFixtures.vp9KeyFrame: header + 200 filler bytes (i*7)&0xff) reports coded size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 23,
+        "method": "vp9KeyFramesOfEveryRungReportTheirOwnSize"
+      },
+      "inputs": {
+        "codec": "VP9",
+        "hex": "82498342404ff02cf648878000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71"
+      },
+      "expected": {
+        "width": 1280,
+        "height": 720
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py vp9_key_sizechange(): port of SizeChangeFixtures.vp9KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-065",
+      "description": "Synthetic AV1 temporal unit (temporal delimiter + sequence header 426x240 + keyframe OBU) reports coded size from the in-band sequence header",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 41,
+        "method": "av1KeyFrameGivesTheSequenceHeaderSize"
+      },
+      "inputs": {
+        "codec": "AV1",
+        "hex": "12000a0a00000042a4d49de617c0320213f0"
+      },
+      "expected": {
+        "width": 426,
+        "height": 240
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_obu()/av1_seq_payload(): port of SizeChangeFixtures.av1KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-066",
+      "description": "Synthetic AV1 temporal unit (temporal delimiter + sequence header 640x360 + keyframe OBU) reports coded size from the in-band sequence header",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 41,
+        "method": "av1KeyFrameGivesTheSequenceHeaderSize"
+      },
+      "inputs": {
+        "codec": "AV1",
+        "hex": "12000a0a00000042a53face617c0320213f0"
+      },
+      "expected": {
+        "width": 640,
+        "height": 360
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_obu()/av1_seq_payload(): port of SizeChangeFixtures.av1KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-067",
+      "description": "Synthetic AV1 temporal unit (temporal delimiter + sequence header 960x540 + keyframe OBU) reports coded size from the in-band sequence header",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 41,
+        "method": "av1KeyFrameGivesTheSequenceHeaderSize"
+      },
+      "inputs": {
+        "codec": "AV1",
+        "hex": "12000a0a00000042a5dfc36617c0320213f0"
+      },
+      "expected": {
+        "width": 960,
+        "height": 540
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_obu()/av1_seq_payload(): port of SizeChangeFixtures.av1KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-068",
+      "description": "Synthetic AV1 temporal unit (temporal delimiter + sequence header 1280x720 + keyframe OBU) reports coded size from the in-band sequence header",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 41,
+        "method": "av1KeyFrameGivesTheSequenceHeaderSize"
+      },
+      "inputs": {
+        "codec": "AV1",
+        "hex": "12000a0a00000042a67fd9e617c0320213f0"
+      },
+      "expected": {
+        "width": 1280,
+        "height": 720
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_obu()/av1_seq_payload(): port of SizeChangeFixtures.av1KeyFrame",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-069",
+      "description": "AV1 keyframe without an in-band sequence header: size from the newest codec configuration (sequence-header OBU 1280x720 then 640x360, or an av1C record 81 08 0c 00 + OBU) = 640x360; without configuration no size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 51,
+        "method": "av1WithoutAnInBandSequenceHeaderUsesTheNewestCodecConfiguration"
+      },
+      "inputs": {
+        "keyframe_hex": "1200320213f0",
+        "configs_hex": [
+          "0a0a00000042a67fd9e617c0",
+          "0a0a00000042a53face617c0"
+        ],
+        "av1c_config_hex": "81080c000a0a00000042a53face617c0"
+      },
+      "expected": {
+        "with_configs": [
+          640,
+          360
+        ],
+        "with_av1c": [
+          640,
+          360
+        ],
+        "without_configs": null
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_obu(): port of SizeChangeFixtures.av1Config/av1cConfig",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-070",
+      "description": "AV1 truncated keyframe (first 5 bytes) or bytes ff 00 00 give no coded size",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/CodedVideoSizeTest.kt",
+        "class": "CodedVideoSizeTest",
+        "line": 72,
+        "method": "truncatedAv1DataGivesNoSize"
+      },
+      "inputs": {
+        "hexes": [
+          "12000a0a00",
+          "ff0000"
+        ]
+      },
+      "expected": {
+        "result": "reject",
+        "size": null
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-071",
+      "description": "VP9 droppability header fields: error-resilient inter 87 01 55 -> not key, error_resilient, refresh_frame_flags 0x01; 83 00 00 -> keyframe",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/BitstreamDroppabilityTest.kt",
+        "class": "BitstreamDroppabilityTest",
+        "line": 18,
+        "method": "vp9HeaderFieldsAreRead"
+      },
+      "inputs": {
+        "cases": [
+          {
+            "hex": "870155"
+          },
+          {
+            "hex": "830000"
+          }
+        ]
+      },
+      "expected": {
+        "results": [
+          {
+            "key_frame": false,
+            "error_resilient": true,
+            "refresh_frame_flags": 1
+          },
+          {
+            "key_frame": true
+          }
+        ]
+      },
+      "expected_literal": true,
+      "kind": "decode",
+      "notes": "resilientInter(refresh) = 87 <refresh> 55 per the test comment (frame_marker 10, profile 0, show_existing 0, inter, shown, error resilient). Bytes assembled from that recipe.",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-072",
+      "description": "VP9 droppable only if error-resilient, non-keyframe and refresh_frame_flags 0: 870055 droppable; 870155 not; 870055 flagged keyframe not; one non-resilient frame (86000055) disables dropping for the session",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/BitstreamDroppabilityTest.kt",
+        "class": "BitstreamDroppabilityTest",
+        "line": 28,
+        "method": "onlyErrorResilientNonRefreshingVp9FramesAreDroppable"
+      },
+      "inputs": {
+        "sequence": [
+          {
+            "hex": "870055",
+            "key_frame": false
+          },
+          {
+            "hex": "870155",
+            "key_frame": false
+          },
+          {
+            "hex": "870055",
+            "key_frame": true
+          }
+        ]
+      },
+      "expected": {
+        "droppable": [
+          true,
+          false,
+          false
+        ],
+        "droppable_frames_counted": 1,
+        "after_non_resilient_86000055": "every later frame of the session is not droppable (second analyzer: 86000055 -> false, then 870055 -> false)"
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "Bytes assembled from the test recipes (resilientInter(0)=87 00 55, nonResilientInter=86 00 00 55).",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-073",
+      "description": "Superframe 87 00 c0 05 c0, AV1 analyzer given a VP9 frame, and empty input are never droppable",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/BitstreamDroppabilityTest.kt",
+        "class": "BitstreamDroppabilityTest",
+        "line": 44,
+        "method": "superframesAndOtherCodecsAreNeverDroppable"
+      },
+      "inputs": {
+        "cases": [
+          {
+            "codec": "VP9",
+            "hex": "8700c005c0"
+          },
+          {
+            "codec": "AV1",
+            "hex": "870055",
+            "note": "resilientInter(0) fed to the AV1 analyzer"
+          },
+          {
+            "codec": "VP9",
+            "hex": ""
+          }
+        ]
+      },
+      "expected": {
+        "droppable": [
+          false,
+          false,
+          false
+        ]
+      },
+      "expected_literal": true,
+      "kind": "derive",
+      "notes": "",
+      "inputs_computed": true
+    },
+    {
+      "id": "stream-protocol-074",
+      "description": "AV1 droppability, one analyzer fed in order (inter frames that refresh nothing are droppable only after the sequence header): results F, F, T, F, T; droppableFrames 2",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Av1DroppabilityTest.kt",
+        "class": "Av1DroppabilityTest",
+        "line": 74,
+        "method": "interFramesThatRefreshNothingAreDroppableAfterTheSequenceHeader"
+      },
+      "inputs": {
+        "sequence": [
+          {
+            "hex": "12003205304a001680",
+            "key_frame": false,
+            "expect_droppable": false,
+            "note": "no sequence header seen yet"
+          },
+          {
+            "hex": "12000a0a00000042a53fbbe617c0320213f0",
+            "key_frame": true,
+            "expect_droppable": false
+          },
+          {
+            "hex": "12003205304a001680",
+            "key_frame": false,
+            "expect_droppable": true
+          },
+          {
+            "hex": "12003205304a005680",
+            "key_frame": false,
+            "expect_droppable": false,
+            "note": "refreshes LAST (libaom override that broke the M31 decoder)"
+          },
+          {
+            "hex": "120032053225000b40",
+            "key_frame": false,
+            "expect_droppable": true,
+            "note": "allow_screen_content_tools=1 header variant"
+          }
+        ],
+        "sequence_header_obu_hex": "0a0a00000042a53fbbe617c0"
+      },
+      "expected": {
+        "droppable": [
+          false,
+          false,
+          true,
+          false,
+          true
+        ],
+        "droppable_frames": 2
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_obu()/av1_seq_payload()/av1_inter_hdr(): port of Av1DroppabilityTest BitWriter helpers (sequence header 640x480: 639/479 in the 11/10-bit fields)",
+      "kind": "derive",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-075",
+      "description": "AV1 sequence header parse and refresh flags: order_hint_bits 7; inter header refresh 0x81 -> 0x81; keyframe header -> 0xff",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Av1DroppabilityTest.kt",
+        "class": "Av1DroppabilityTest",
+        "line": 81,
+        "method": "refreshFlagsParseFromTheFrameHeader"
+      },
+      "inputs": {
+        "sequence_header_payload_hex": "00000042a53fbbe617c0",
+        "inter_frame_header_hex": "304a205680",
+        "key_frame_header_hex": "13f0"
+      },
+      "expected": {
+        "order_hint_bits": 7,
+        "inter_refresh_flags": 129,
+        "key_refresh_flags": 255
+      },
+      "expected_literal": false,
+      "computed_by": "build_calls_streams.py av1_*(): port of Av1DroppabilityTest BitWriter helpers",
+      "kind": "decode",
+      "notes": ""
+    },
+    {
+      "id": "stream-protocol-076",
+      "description": "Truncated AV1 inter frame (3 bytes removed) after the sequence header is never droppable",
+      "provenance": {
+        "file": "app/src/test/java/com/example/bluetoothtest/Av1DroppabilityTest.kt",
+        "class": "Av1DroppabilityTest",
+        "line": 90,
+        "method": "truncatedDataIsNeverDroppable"
+      },
+      "inputs": {
+        "setup_hex": "0a0a00000042a53fbbe617c0320213f0",
+        "frame_hex": "3205304a"
+      },
+      "expected": {
+        "droppable": false,
+        "result": "not droppable"
+      },
+      "expected_literal": true,
+      "kind": "reject",
+      "notes": "",
+      "inputs_computed": true
+    }
+  ],
+  "description": "BTV3 stream header and packet framing, audio pairing/batching, debug integrity, forwarded-stream grant BFG1, group control BMG1/BGK1, mesh/inner flag mapping, VP9/AV1 keyframe parsing"
+}

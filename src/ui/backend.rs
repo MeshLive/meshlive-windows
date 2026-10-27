@@ -127,6 +127,9 @@ pub enum Update {
     Searching(bool),
     Streams(Vec<StreamEntry>),
     WatchAvailable(bool),
+    /// Why Watch and Go live can't run on this PC (None: they can). The Live
+    /// page stays in the navigation and shows this instead of hiding.
+    LiveSupport(Option<String>),
     WatchNote(Option<String>),
     WatchRoute(u8),
     WatchTitle(String),
@@ -162,8 +165,15 @@ pub enum Update {
     DiagnosticsSaved(Result<String, String>),
     /// Where the peer's decoded pictures appear during this call.
     CallPictures(PictureHandle),
+    /// This PC's own camera pictures (small, mirrored) for the call screen's
+    /// self-view, while this call sends video.
+    CallSelfPictures(PictureHandle),
     /// The peer's verified name label (CF-REC-43); shown for an unverified peer.
     CallPeerName(String),
+    /// A stranger caller's generated name (names-v2 of its throwaway node ID,
+    /// Android `strangerGeneratedName`); shown while Friendly names is on and
+    /// no name label replaced it.
+    CallPeerGenerated(String),
     /// The call's microphone: None = on (capturing for this call); Some =
     /// unusable, with the reason the user reads.
     CallMic(Option<String>),

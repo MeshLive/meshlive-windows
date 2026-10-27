@@ -37,11 +37,12 @@ What `Build.ps1` does:
 
 1. `scripts/native_audio.py` downloads the pinned libopus source and the build-only tools listed in
    `sources.lock.json` (CMake, NASM, GNU make), checks each SHA-256 before extracting, and builds libopus with the
-   static CRT.
+   static CRT. Its `__FILE__` paths are trimmed (`/d1trimfile`), so no build folder ends up in the app.
 2. `scripts/native_encoder.py` does the same for libaom 3.14.1 (software AV1) and libvpx 1.17.0 (software VP9).
 3. Cargo builds and tests the app with `--locked` (exact versions from `Cargo.lock`) and one job at a time, so the
    build fits on a laptop with limited memory. The release profile links the C runtime statically
-   (`.cargo/config.toml`).
+   (`.cargo/config.toml`). Release builds also remap the checkout and crate-cache paths
+   (`--remap-path-prefix`) and name the PDB without its folder, so the exe embeds no build-machine path.
 
 Tests run with `--test-threads=1`, because several tests own process-wide Windows state (COM apartments, Media
 Foundation, the D3D11 device). Normal tests open no camera, microphone, speaker or Bluetooth radio; the D3D11 tests

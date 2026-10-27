@@ -314,3 +314,34 @@ fn route_rows_prefer_joinable_routes_survive_floods_and_expire() {
     offers.prune(now + Duration::from_secs(13));
     assert!(offers.rows(1).is_empty());
 }
+
+#[test]
+fn live_is_on_by_default_and_says_plainly_why_it_cannot_run() {
+    use crate::bluetooth::{Capabilities, Radio};
+    assert!(switch_on(None) && switch_on(Some("1")) && switch_on(Some("")), "on unless explicitly 0");
+    assert!(!switch_on(Some("0")));
+    let caps = |radio, peripheral, extended| Capabilities {
+        radio,
+        low_energy: Some(true),
+        central: Some(true),
+        peripheral: Some(peripheral),
+        extended_advertising: extended,
+        max_advertisement_bytes: None,
+        error: None,
+    };
+    let ok: Result<&'static str, &'static str> = Ok("intel-ax");
+    assert_eq!(unsupported_reason(true, &caps(Radio::On, true, Some(true)), ok), None);
+    assert_eq!(unsupported_reason(false, &caps(Radio::On, true, Some(true)), ok).as_deref(), Some(LIVE_SWITCHED_OFF));
+    let off = unsupported_reason(true, &caps(Radio::Off, true, Some(true)), ok).unwrap();
+    assert_eq!(off, BLUETOOTH_OFF, "the same words as the Bluetooth-off event");
+    // Old Windows is named as such (its adapter facts are not trusted then).
+    let old = unsupported_reason(true, &caps(Radio::On, true, None), Err(crate::qw_policy::OLD_WINDOWS)).unwrap();
+    assert!(old.starts_with(LIVE_NEEDS) && old.contains("older version of Windows"), "{old}");
+    for (peripheral, extended) in [(false, Some(true)), (true, Some(false)), (true, None)] {
+        let adapter = unsupported_reason(true, &caps(Radio::On, peripheral, extended), ok).unwrap();
+        assert!(adapter.starts_with(LIVE_NEEDS) && adapter.contains("can't advertise"), "{adapter}");
+        assert!(adapter.contains("Calling a phone still works"));
+    }
+    let unlisted = unsupported_reason(true, &caps(Radio::On, true, Some(true)), Err(crate::qw_policy::NOT_LISTED)).unwrap();
+    assert!(unlisted.ends_with(crate::qw_policy::NOT_LISTED), "{unlisted}");
+}

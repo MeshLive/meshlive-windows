@@ -6,6 +6,7 @@
 pub mod backend;
 pub mod components;
 mod android_icons;
+mod call_layout;
 mod icons;
 pub mod model;
 mod screens;
@@ -34,7 +35,6 @@ use model::*;
 const SECONDARY: Color32 = theme::TEXT_SECONDARY;
 #[allow(dead_code)]
 const CARD: Color32 = theme::SURFACE;
-const LINE: Color32 = theme::DIVIDER;
 const RED: Color32 = theme::LIVE;
 /// While the adapter capabilities are still being read.
 const CHECKING_BLUETOOTH: &str = "Checking Bluetooth\u{2026}";
@@ -48,7 +48,6 @@ pub enum Page {
     Settings,
 }
 impl Page {
-    #[cfg(test)]
     pub const ALL: [Page; 4] = [Page::Home, Page::Calls, Page::Contacts, Page::Settings];
     pub fn label(self) -> &'static str {
         match self {
@@ -153,8 +152,20 @@ pub struct Ui {
     test: test_hooks::State,
     peer_seen: u64,
     peer_texture: Option<egui::TextureHandle>,
+    /// A tiny blurred copy of the peer's picture for the sides of the video area.
+    peer_backdrop: Option<egui::TextureHandle>,
     pub peer_size: [u32; 2],
     pub peer_turns: u8,
+    /// This PC's own camera in a call (the self-view): the slot, the last
+    /// shown sequence, the texture and its size.
+    self_pictures: Option<backend::PictureHandle>,
+    /// Why Watch and Go live can't run on this PC (shown on the Live page).
+    pub live_unsupported: Option<String>,
+    /// The call screen's technical media lines are shown (collapsed by default).
+    pub call_details_open: bool,
+    self_seen: u64,
+    self_texture: Option<egui::TextureHandle>,
+    pub self_size: [u32; 2],
     backend: Box<dyn Backend>,
     #[cfg(test)]
     native_check: Option<native_call_check::State>,
@@ -222,6 +233,12 @@ pub struct Ui {
     /// The person or contact selected in a wide window's list.
     pub selected_person: Option<Handle>,
     pub selected_contact: Option<Handle>,
+    /// The contact whose other actions (Rename, Safety code, Block, Forget) are open.
+    pub contact_more: Option<Handle>,
+    /// The status popover is open under the indicator at this rectangle.
+    pub status_open: Option<egui::Rect>,
+    /// The Live list also shows the streams this PC can't watch.
+    pub show_unwatchable: bool,
     /// The Settings category shown in a wide window.
     pub settings_section: SettingsSection,
     /// Experimental, off by default (`MESHLIVE_UI_SPLIT_PANES=1`): list +
@@ -267,8 +284,15 @@ impl Ui {
             test: Default::default(),
             peer_seen: 0,
             peer_texture: None,
+            peer_backdrop: None,
             peer_size: [16, 9],
             peer_turns: 0,
+            self_pictures: None,
+            live_unsupported: None,
+            call_details_open: false,
+            self_seen: 0,
+            self_texture: None,
+            self_size: [4, 3],
             video: None,
             backend,
             #[cfg(test)]
@@ -317,6 +341,9 @@ impl Ui {
             answer_as: None,
             selected_person: None,
             selected_contact: None,
+            contact_more: None,
+            status_open: None,
+            show_unwatchable: false,
             settings_section: SettingsSection::Profile,
             split_panes: std::env::var("MESHLIVE_UI_SPLIT_PANES").ok().as_deref() == Some("1"),
             name_edit: None,
@@ -418,6 +445,7 @@ impl Ui {
             }
             Update::People(list) => self.people = list,
             Update::WatchAvailable(_) => {},
+            Update::LiveSupport(reason) => self.live_unsupported = reason,
             Update::WatchNote(note) => self.watch_note = note,
             Update::WatchRoute(hops) => if let Some(w) = self.watch.as_mut() { w.route = if hops == 0 { Reach::Direct } else { Reach::Via(hops) }; },
             Update::WatchTitle(title) => if let Some(w) = self.watch.as_mut() { w.stream.title = Some(title); },
@@ -485,6 +513,18 @@ impl Ui {
             Update::CallPictures(handle) => {
                 self.peer_seen = 0;
                 self.peer_pictures = Some(handle);
+            }
+            Update::CallSelfPictures(handle) => {
+                self.self_seen = 0;
+                self.self_pictures = Some(handle);
+                // A new camera start: never show the previous start's last picture.
+                self.self_texture = None;
+            }
+            Update::CallPeerGenerated(name) => {
+                let friendly = self.switches.generated_names;
+                if let Some(call) = self.call.as_mut().filter(|c| !c.verified && friendly) {
+                    call.peer = name;
+                }
             }
             Update::CallPeerName(name) => {
                 if let Some(call) = self.call.as_mut() {
@@ -679,6 +719,7 @@ impl Ui {
         self.watch_note = None;
         self.peer_pictures = None;
         self.peer_texture = None;
+        self.peer_backdrop = None;
         self.video = None;
         self.backend.command(Command::Watch(id));
         self.focus_primary = true;
@@ -761,10 +802,33 @@ impl Ui {
     }
     /// Uploads the newest decoded peer picture (if any) and traces each one
     /// shown, so a run can count shown frames against decoded ones.
+    /// Uploads this PC's newest self-view picture (if any); dropped with the call.
+    fn show_self_picture(&mut self, ctx: &egui::Context) {
+        if self.call.is_none() {
+            self.self_pictures = None;
+            self.self_texture = None;
+            return;
+        }
+        let Some(handle) = self.self_pictures.clone() else { return };
+        let Some(picture) = handle.0.take_newer(self.self_seen) else { return };
+        self.self_seen = picture.seq;
+        let image = egui::ColorImage::from_rgba_unmultiplied([picture.width as usize, picture.height as usize], &picture.rgba);
+        match self.self_texture.as_mut() {
+            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+            None => self.self_texture = Some(ctx.load_texture("self-video", image, egui::TextureOptions::LINEAR)),
+        }
+        self.self_size = [picture.width, picture.height];
+    }
+    /// The self-view texture while this call's camera is on.
+    pub(crate) fn self_video(&self) -> Option<(egui::TextureId, [u32; 2])> {
+        let on = self.call.as_ref().is_some_and(|c| c.camera) && matches!(self.call_camera, Some(None));
+        self.self_texture.as_ref().filter(|_| on).map(|t| (t.id(), self.self_size))
+    }
     fn show_peer_picture(&mut self, ctx: &egui::Context) {
         if self.call.is_none() && self.watch.is_none() {
             if self.peer_pictures.take().is_some() {
                 self.peer_texture = None;
+                self.peer_backdrop = None;
                 self.video = None;
                 self.peer_seen = 0;
             }
@@ -776,14 +840,26 @@ impl Ui {
         let Some(picture) = handle.0.take_newer(self.peer_seen) else { return };
         let skipped = picture.seq.saturating_sub(self.peer_seen + 1);
         self.peer_seen = picture.seq;
-        let image = egui::ColorImage::from_rgba_unmultiplied([picture.width as usize, picture.height as usize], &picture.rgba);
+        // Turned upright here (the sender's clockwise quarter turns), so every
+        // screen draws it as a plain picture with rounded corners.
+        self.peer_turns = handle.0.turns();
+        let (w, h, upright) = call_layout::rotate_rgba(&picture.rgba, picture.width as usize, picture.height as usize, self.peer_turns);
+        let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &upright);
         match self.peer_texture.as_mut() {
             Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
             None => self.peer_texture = Some(ctx.load_texture("peer-video", image, egui::TextureOptions::LINEAR)),
         }
+        // A tiny copy, drawn large and dark, softly fills the sides.
+        let (bw, bh, small) = call_layout::backdrop_rgba(&upright, w, h, 16);
+        if bw > 0 {
+            let image = egui::ColorImage::from_rgba_unmultiplied([bw, bh], &small);
+            match self.peer_backdrop.as_mut() {
+                Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+                None => self.peer_backdrop = Some(ctx.load_texture("peer-backdrop", image, egui::TextureOptions::LINEAR)),
+            }
+        }
         self.video = self.peer_texture.as_ref().map(|t| t.id());
-        self.peer_size = [picture.width, picture.height];
-        self.peer_turns = handle.0.turns();
+        self.peer_size = [w as u32, h as u32];
         crate::radio_backend::trace(
             "peer_frame_shown",
             &format!(
@@ -800,13 +876,10 @@ impl Ui {
         );
     }
     /// A call exists (the main loop keeps the model ticking for it).
-    /// The navigation's pages: Live only where this PC has live streams.
+    /// The navigation's pages, always all four (like Android): where this PC
+    /// can't run live streams, the Live page says why.
     pub fn pages(&self) -> Vec<Page> {
-        let mut pages = vec![Page::Calls, Page::Contacts, Page::Settings];
-        if self.backend.streams() {
-            pages.insert(0, Page::Home);
-        }
-        pages
+        Page::ALL.to_vec()
     }
     pub fn in_call(&self) -> bool {
         self.call.is_some()
@@ -872,6 +945,7 @@ impl Ui {
     pub fn show(&mut self, ctx: &egui::Context, texture: egui::TextureId, renderer: &str) {
         self.pump();
         self.show_peer_picture(ctx);
+        self.show_self_picture(ctx);
         let streams_visible = meshlive::stream_watch::enabled() && self.backend.streams() && self.page == Page::Home && self.call.is_none() && self.watch.is_none() && !self.golive_open;
         if streams_visible != self.streams_visible_sent {
             self.streams_visible_sent = streams_visible;
@@ -886,10 +960,6 @@ impl Ui {
         self.test_hooks_tick(Some(ctx));
         if let Some(due) = self.backend.next_due() {
             ctx.request_repaint_after(due.max(std::time::Duration::from_millis(16)));
-        }
-        // Hide Live until the backend can actually watch on this platform.
-        if self.page == Page::Home && !self.backend.streams() {
-            self.page = Page::Calls;
         }
         let in_call = self.call.is_some();
         let takeover = in_call || self.watch.is_some() || self.golive_open;
@@ -920,19 +990,17 @@ impl Ui {
                 } else {
                     components::content_column(ui, |ui| {
                         let (word, tone) = self.status();
-                        let mut status = false;
+                        let mut status = None;
                         components::top_bar(ui, self.page.label(), None, |ui| {
-                            status = components::status_chip(ui, word, tone).clicked();
+                            let chip = components::status_chip(ui, word, tone);
+                            if chip.clicked() {
+                                status = Some(chip.rect);
+                            }
                         });
-                        if status {
-                            self.dialog = Some(("Status".into(), self.status_detail()));
-                        }
-                        // Windows cannot announce this PC while it sleeps:
-                        // say so under "Ready" whenever calls are allowed.
-                        if word == "Ready" && self.calls_allowed() {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                                ui.label(theme::caption(AWAKE_NOTE));
-                            });
+                        // Tapping the status opens its popover (Android's status
+                        // sheet): Reachable, your generated name, what's wrong.
+                        if let Some(anchor) = status {
+                            self.status_open = if self.status_open.is_some() { None } else { Some(anchor) };
                         }
                         self.shell_notices(ui);
                         ui.add_space(8.0);
@@ -972,6 +1040,7 @@ impl Ui {
                     });
                 }
             });
+        self.status_popover(ctx);
         self.dialogs(ctx);
         if self.texture_visible {
             egui::Window::new("Graphics diagnostics")
@@ -999,7 +1068,11 @@ impl Ui {
             return ("On air", Tone::Live);
         }
         match self.bluetooth.map(|caps| caps.radio) {
-            None => ("Checking\u{2026}", Tone::Ok),
+            None => ("Checking\u{2026}", Tone::Attention),
+            // Android: "Hidden" when phones can't call (Allow calls off, an
+            // adapter that can't announce, or the announcement failed).
+            Some(Radio::On) if !self.reachable_now() => ("Hidden", Tone::Attention),
+            Some(Radio::On) if self.keys_damaged() => ("Reset needed", Tone::Attention),
             Some(Radio::On) => ("Ready", Tone::Ok),
             Some(Radio::Off | Radio::Disabled) => ("Bluetooth off", Tone::Problem),
             Some(Radio::Missing) => ("No Bluetooth", Tone::Problem),
@@ -1007,17 +1080,83 @@ impl Ui {
             Some(Radio::Unknown | Radio::Unavailable) => ("Bluetooth unavailable", Tone::Problem),
         }
     }
-    fn status_detail(&self) -> String {
-        let mut lines = vec![self.bluetooth.map_or(CHECKING_BLUETOOTH, |caps| caps.status()).to_owned()];
-        lines.push(match self.unavailable_reason(Feature::ReceiveCalls) {
-            Some(reason) => format!("Phones can't call this PC. {reason}"),
-            None if self.switches.receive_calls => format!("Phones nearby can call this PC. {AWAKE_NOTE}."),
-            None => "Allow calls is off.".into(),
-        });
-        if self.golive.running() {
-            lines.push("You are live.".into());
+    /// Phones can ring this PC now (as far as this PC knows).
+    fn reachable_now(&self) -> bool {
+        self.calls_allowed() && (self.pc_visible || self.visibility_note.is_none())
+    }
+    /// The saved contact keys are damaged (the popover offers the reset).
+    fn keys_damaged(&self) -> bool {
+        self.visibility_note.as_deref().is_some_and(|n| n.contains(KEYS_DAMAGED))
+    }
+    /// The status popover under the indicator: Bluetooth, the Reachable switch
+    /// (Allow calls, only while this PC is awake), the generated name, and
+    /// any reason phones can't call. Closes on Escape or a click outside.
+    fn status_popover(&mut self, ctx: &egui::Context) {
+        let Some(anchor) = self.status_open else { return };
+        if self.call.is_some() || self.watch.is_some() || self.golive_open || self.meet.is_some() {
+            self.status_open = None;
+            return;
         }
-        lines.join("\n\n")
+        let width = 400.0f32.min(ctx.content_rect().width() - 32.0).max(200.0);
+        let left = (anchor.right() - width).max(ctx.content_rect().left() + 16.0);
+        let mut reset = false;
+        let mut flipped = false;
+        let area = egui::Area::new(egui::Id::new("status-popover"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(egui::pos2(left, anchor.bottom() + 6.0))
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(theme::RAISED)
+                    .stroke(egui::Stroke::new(1.0, Color32::from_gray(60)))
+                    .corner_radius(14)
+                    .inner_margin(egui::Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.set_width(width - 28.0);
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        ui.label(theme::secondary(self.bluetooth.map_or(CHECKING_BLUETOOTH, |caps| caps.status())));
+                        let receive_ok = self.usable(Feature::ReceiveCalls);
+                        let mut reachable = self.switches.receive_calls && receive_ok;
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.label(RichText::new("Reachable").size(15.0).color(theme::TEXT));
+                                ui.label(theme::caption("Phones nearby can call this PC while it's awake"));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                flipped = components::compact_switch(ui, "", "Reachable", AWAKE_NOTE, &mut reachable, receive_ok).changed();
+                            });
+                        });
+                        if flipped {
+                            self.switches.receive_calls = reachable;
+                        }
+                        if let Some(name) = self.appear_as().map(str::to_owned) {
+                            components::line_with_info(ui, "appear-as", &format!("You appear as {name} \u{b7} changes every 15 min"), "About your generated name", APPEAR_AS_INFO);
+                        }
+                        if let Some(reason) = self.unavailable_reason(Feature::ReceiveCalls) {
+                            ui.add(egui::Label::new(theme::secondary(format!("Phones can't call this PC. {reason}"))).wrap());
+                        } else if let Some(note) = self.visibility_note.clone().filter(|_| self.switches.receive_calls) {
+                            ui.add(egui::Label::new(theme::secondary(note)).wrap());
+                            if self.keys_damaged() {
+                                reset = Pill::new("Reset").kind(Kind::Secondary).small().a11y("Reset this PC's contact keys").show(ui).clicked();
+                            }
+                        }
+                        if self.golive.running() {
+                            ui.label(theme::secondary("You are live."));
+                        }
+                    });
+            });
+        if flipped {
+            self.switches_changed();
+        }
+        if reset {
+            self.backend.command(Command::ResetPresenceKey);
+        }
+        let outside = ctx.input(|i| {
+            i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !anchor.contains(p))
+        });
+        if outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.status_open = None;
+        }
     }
 
     /// The tab page's one pinned action, at the bottom of the window where
@@ -1444,24 +1583,6 @@ fn chip(ui: &mut egui::Ui, label: &str, selected: bool, enabled: bool) -> egui::
     let on = response.enabled();
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, on, selected, label));
     response
-}
-
-/// A 16:9 picture area. Shows `texture` when given, otherwise the status text.
-fn picture(ui: &mut egui::Ui, name: &str, status: &str, texture: Option<egui::TextureId>, max_height: f32) {
-    let width = ui.available_width();
-    let height = (width * 9.0 / 16.0).min(max_height).max(120.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("{name}. {status}")));
-    let corner = egui::CornerRadius::same(theme::SHEET_RADIUS);
-    ui.painter().rect_filled(rect, corner, Color32::from_gray(10));
-    match texture {
-        Some(id) => {
-            egui::Image::new((id, rect.size())).corner_radius(corner).paint_at(ui, rect);
-        }
-        None => {
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, status, theme::Type::Body.font(), SECONDARY);
-        }
-    }
 }
 
 /// Screen readers and voice input set a text field's whole value through UI

@@ -471,9 +471,8 @@ impl Pipe {
                     return Err(lost);
                 }
             }
-            if Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
+            // Data that is already here is returned even when the wait is
+            // over: a zero wait drains the queue instead of timing out.
             if let Some(first) = state.ready.front() {
                 let count = output.len().min(first.len() - state.offset);
                 output[..count].copy_from_slice(&first[state.offset..state.offset + count]);
@@ -488,6 +487,9 @@ impl Pipe {
             }
             if state.closed {
                 return Ok(0);
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout);
             }
             let sleep = deadline
                 .saturating_duration_since(Instant::now())
@@ -619,6 +621,20 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_read_returns_queued_values_even_after_its_wait_is_over() {
+        let pipe = Pipe::default();
+        pipe.offer(&packet(0, b"one")).unwrap();
+        pipe.offer(&packet(1, b"two")).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let past = Instant::now() - Duration::from_millis(5);
+        let mut out = [0u8; 16];
+        assert_eq!(pipe.read(&mut out, past, &cancelled), Ok(3));
+        assert_eq!(&out[..3], b"one");
+        assert_eq!(pipe.read(&mut out, past, &cancelled), Ok(3));
+        assert_eq!(&out[..3], b"two");
+        assert_eq!(pipe.read(&mut out, past, &cancelled), Err(Error::Timeout), "empty: the wait is over");
+    }
     #[test]
     fn the_value_cap_is_off_unless_set_in_range() {
         assert_eq!(parse_value_max(None), 512);

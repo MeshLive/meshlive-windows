@@ -8,7 +8,7 @@ known to fail; it has simply not been reported yet.
 
 ## Windows versions
 
-| Windows | Calling out | Receiving calls | Watch / Go live (experimental) | Tested |
+| Windows | Calling out | Receiving calls | Watch / Go live (beta) | Tested |
 | --- | --- | --- | --- | --- |
 | Windows 11 24H2 or newer, x64 | Yes | Yes, on an allowlisted adapter | Yes, on an allowlisted adapter | Yes (one laptop) |
 | Windows 11 before 24H2, x64 | Expected | No: the app needs the extended-advertising API added in build 26100 | No | No |
@@ -19,7 +19,7 @@ known to fail; it has simply not been reported yet.
 
 Calling a phone needs an adapter that supports the Bluetooth LE central role, which almost every adapter does.
 
-Being **called** (and the Watch and Go live experiments) needs the PC to announce itself. Windows does not let an app
+Being **called** (and Watch and Go live) needs the PC to announce itself. Windows does not let an app
 read or choose the address it advertises from, so MeshLive announces only on adapter families whose address rotation
 has been measured: the address must change whenever the rotating ID changes, so a fixed address cannot link your
 IDs together. This is a fail-closed allowlist in `src/qw_policy.rs`, the Windows counterpart of Android's

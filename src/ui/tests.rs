@@ -123,6 +123,9 @@ impl Rig {
         let mut ui = Ui::with_backend(Box::new(Fake(shared.clone())));
         // The first-run welcome is tested on its own (it would cover every screen).
         ui.switches.onboarded = true;
+        // Go live is on by default, so it asks about exposure every session;
+        // that consent has its own tests (they set this back to true).
+        ui.live_consent_required = false;
         Self { size: egui::vec2(1000.0, 720.0), time: None, focused: true, ui, shared, ctx }
     }
     fn send(&mut self, update: Update) {
@@ -277,8 +280,9 @@ fn live_navigation_follows_watch_capability_and_unsupported_video_does_not_block
     rig.ui.leave_watch();
     rig.shared.borrow_mut().no_streams = true;
     rig.ui.page = Page::Home;
-    assert!(!rig.has("Live"));
-    assert_eq!(rig.ui.page, Page::Calls);
+    assert!(rig.has("Live"), "Live stays in the navigation");
+    assert_eq!(rig.ui.page, Page::Home);
+    assert!(!rig.has("Go live"));
 }
 
 #[test]
@@ -414,7 +418,9 @@ fn an_adapter_that_cannot_advertise_keeps_outgoing_calls_and_shows_the_exact_rea
     // Calls: the call buttons work, receiving is explained.
     rig.ui.page = Page::Calls;
     assert!(!rig.disabled("Voice call Priya"));
-    assert!(rig.contains(&format!("Unavailable. {NO_PERIPHERAL}")));
+    rig.click("Hidden");
+    assert!(rig.contains(&format!("Phones can't call this PC. {NO_PERIPHERAL}")), "the status popover says why");
+    let _ = rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
     rig.click("Voice call Priya");
     assert!(rig.ui.call.is_some(), "an outgoing call starts");
     // An incoming call is never shown (this PC cannot advertise).
@@ -625,6 +631,7 @@ fn voice_call_details_follow_each_camera_instead_of_the_shared_media_header() {
     for enabled in [false, true] {
         let mut rig = Rig::full();
         rig.ui.accurate_call_media = enabled;
+        rig.ui.call_details_open = true;
         rig.populate(); rig.ui.pump();
         assert!(rig.ui.place_call(10, true));
         rig.send(Update::CallSignal(remote(ID, Signal::Ringing)));
@@ -657,6 +664,7 @@ fn camera_off_while_ringing_keeps_voice_calls_out_of_the_video_layout() {
     for enabled in [false, true] {
         for incoming in [false, true] {
             let mut rig = Rig::full(); rig.ui.accurate_call_media = enabled;
+            rig.ui.call_details_open = true;
             rig.populate(); rig.ui.pump();
             if incoming {
                 rig.send(Update::IncomingCall { peer: "peer".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: None });
@@ -688,9 +696,12 @@ fn a_call_to_a_phone_paired_with_this_pc_says_the_link_is_identity_bound() {
     rig.ui.pump();
     rig.ui.page = Page::Calls;
     rig.click("Voice call Priya");
-    assert!(!rig.contains(super::screens::BONDED_NOTE));
+    assert!(!rig.contains(super::screens::BONDED_SHORT));
     rig.send(Update::CallBonded);
-    assert!(rig.contains(super::screens::BONDED_NOTE));
+    assert!(rig.contains(super::screens::BONDED_SHORT), "one compact line");
+    assert!(!rig.contains(super::screens::BONDED_NOTE));
+    rig.click("Learn more");
+    assert!(rig.contains(super::screens::BONDED_NOTE), "the whole explanation on request");
     assert!(rig.ui.call.as_ref().unwrap().bonded);
 }
 
@@ -748,14 +759,16 @@ fn an_incoming_call_rings_and_accept_or_decline_work_from_the_ring_screen() {
 fn the_calls_page_says_when_this_pc_is_visible_to_phones_and_why_not() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Calls;
+    rig.ui.switches.receive_calls = true;
     rig.send(Update::Visibility { visible: true, note: None });
     rig.ui.pump();
-    assert!(rig.has("Visible to people nearby"));
+    assert!(rig.has("Ready"));
     let why = meshlive::qw_policy::NOT_LISTED;
     rig.send(Update::Visibility { visible: false, note: Some(why.into()) });
     rig.ui.pump();
-    assert!(!rig.has("Visible to people nearby"));
-    assert!(rig.has("Not visible to people nearby") && rig.contains("hasn't been checked"));
+    assert!(rig.has("Hidden"));
+    rig.click("Hidden");
+    assert!(rig.contains("hasn't been checked"), "the popover says why");
     // A refused real start latches the Receive calls gate with its reason.
     rig.send(Update::AdvertisingProof(Err(meshlive::bluetooth::gate::Refusal::Aborted)));
     rig.ui.pump();
@@ -770,7 +783,9 @@ fn the_call_screen_says_whether_the_microphone_is_on_or_why_it_cannot_be_used() 
     rig.click("Accept");
     rig.send(Update::CallMediaReady);
     rig.send(Update::CallMic(None));
-    assert!(rig.contains("Microphone on"));
+    // A working microphone is shown by the Mute button alone (no status words).
+    assert!(rig.has("Mute"));
+    assert!(!rig.contains("Microphone on"));
     let why = "Microphone access is off for desktop apps in Windows privacy settings, so the other person can't hear you.";
     rig.send(Update::CallMic(Some(why.into())));
     assert!(rig.contains("Microphone access is off"));
@@ -834,7 +849,7 @@ fn talk_waits_for_fresh_microphone_readiness_and_overrides_latched_mute_wording(
         assert!(rig.has("Starting microphone\u{2026}"), "an open notification alone is not the current restart acknowledgement");
         rig.send(Update::CallCaptureReady);
         assert!(rig.has("Talking\u{2026}"));
-        assert_eq!(rig.contains("Microphone on \u{b7} muted"), !accurate);
+        assert!(!rig.contains("Microphone on"), "no technical status words");
         let _ = rig.frame(vec![button(false)]);
         assert!(rig.has("Muted"));
         rig.click("Unmute");
@@ -872,6 +887,8 @@ fn a_contacts_safety_code_is_shown_on_request() {
     rig.ui.page = Page::Contacts;
     rig.send(Update::Contacts(vec![Contact { id: 20, name: "Asha".into(), by_qr: true, nearby: false, lease: true, blocked: false }]));
     rig.ui.pump();
+    rig.ui.contact_more = None;
+    rig.click("More for Asha");
     rig.click("Safety code with Asha");
     assert!(rig.log().contains(&Command::ShowSafetyCode(20)));
     let code = "71883 11788 79268 78261 54534 68020 91662 04557 05960 21671 25144 22586";
@@ -942,6 +959,7 @@ fn the_scripted_core_answers_an_outgoing_call_end_to_end() {
     let mut ui = Ui::with_backend(Box::new(ScriptedBackend::demo(std::time::Duration::ZERO)));
     ui.bluetooth = Some(caps(true, true));
     ui.peripheral_proof = PeripheralProof::Started;
+    ui.live_consent_required = false;
     ui.pump();
     assert_eq!(ui.people.len(), 2);
     assert!(ui.place_call(10, true));
@@ -973,7 +991,9 @@ fn going_live_with_video_shows_state_and_viewer_count_and_stops() {
     assert!(rig.has("Video and audio") && rig.has("Audio only"));
     rig.ui.golive.title = "Market".into();
     rig.click("Go live");
-    assert_eq!(rig.log(), [Command::GoLive { kind: LiveKind::Video, title: "Market".into(), initial: Default::default() }]);
+    // (Live on screen also tells the core to look for streams: StreamsVisible.)
+    let started: Vec<_> = rig.log().into_iter().filter(|c| !matches!(c, Command::StreamsVisible(_))).collect();
+    assert_eq!(started, [Command::GoLive { kind: LiveKind::Video, title: "Market".into(), initial: Default::default() }]);
     assert!(rig.has("Starting\u{2026}"));
     rig.send(Update::Live(LiveEvent::Started));
     rig.send(Update::Live(LiveEvent::Viewers(3)));
@@ -1081,6 +1101,8 @@ fn contacts_can_be_renamed_and_forgotten_with_confirmation_and_store_problems_sh
     let mut rig = Rig::full();
     rig.populate();
     rig.ui.page = Page::Contacts;
+    rig.ui.contact_more = None;
+    rig.click("More for Ravi");
     rig.click("Rename Ravi");
     assert!(rig.has("Rename contact") && rig.has("Only you see this name."));
     rig.click("Save");
@@ -1092,6 +1114,8 @@ fn contacts_can_be_renamed_and_forgotten_with_confirmation_and_store_problems_sh
     assert!(rig.contains("Another contact already has that name"));
     rig.send(Update::Renamed { contact: 12, outcome: RenameOutcome::Renamed });
     assert!(!rig.has("Rename contact"));
+    rig.ui.contact_more = None;
+    rig.click("More for Priya");
     rig.click("Forget Priya");
     assert!(rig.has("Forget Priya?"));
     assert!(rig.contains("To trust them again you need to verify them in person."));
@@ -1153,7 +1177,7 @@ fn a_failed_setup_to_a_paired_phone_keeps_the_bonded_note_with_its_reason() {
     rig.click("Voice call Priya");
     rig.send(Update::CallBonded);
     rig.send(Update::CallSetupFailed("Couldn't connect the call. Try again.".into()));
-    assert!(rig.contains(super::screens::BONDED_NOTE));
+    assert!(rig.contains(super::screens::BONDED_SHORT));
     assert!(rig.contains("Couldn't connect the call. Try again."));
 }
 
@@ -1343,6 +1367,8 @@ fn a_damaged_presence_store_offers_reset_presence_key() {
         note: Some("This PC's saved contact keys are damaged, so phones can't call it. Reset fixes this.".into()),
     });
     rig.ui.pump();
+    rig.ui.switches.receive_calls = true;
+    rig.click("Hidden");
     rig.click("Reset this PC's contact keys");
     assert!(rig.log().contains(&Command::ResetPresenceKey));
 }
@@ -1356,7 +1382,9 @@ fn a_damaged_presence_store_still_visible_on_ephemeral_ids_offers_the_reset() {
         note: Some("This PC's saved contact keys are damaged, so your contacts can't recognise this PC (they can still call it with its code). Reset fixes this; contacts recognise this PC again after a call.".into()),
     });
     rig.ui.pump();
-    assert!(rig.contains("Visible to people nearby"));
+    rig.ui.switches.receive_calls = true;
+    assert!(rig.has("Reset needed"));
+    rig.click("Reset needed");
     assert!(rig.contains("contacts can't recognise this PC"));
     rig.click("Reset this PC's contact keys");
     assert!(rig.log().contains(&Command::ResetPresenceKey));
@@ -1450,17 +1478,39 @@ fn every_neighbouring_pair_of_settings_switches_has_a_divider() {
     assert!(missing.is_empty(), "no divider between: {missing:#?}\nlines at {lines:?}");
 }
 
-/// Windows cannot announce this PC while it sleeps: when calls are allowed,
-/// "Ready" says so; with Receive calls off it does not.
+/// Android's status indicator: a green "Ready" when phones can call this
+/// PC, "Hidden" when they can't; tapping it opens the popover with the
+/// Reachable switch (Allow calls, while awake) and the generated name. The
+/// Calls page itself carries no status card.
 #[test]
-fn ready_says_reachable_while_this_pc_is_awake_only_when_calls_are_allowed() {
+fn the_status_indicator_says_ready_or_hidden_and_opens_reachable_and_your_name() {
     let mut rig = Rig::full();
+    rig.ui.page = Page::Calls;
     rig.ui.switches.receive_calls = true;
-    assert!(rig.contains("Reachable while this PC is awake"));
-    rig.ui.switches.receive_calls = false;
-    assert!(!rig.contains("Reachable while this PC is awake"));
+    rig.ui.pc_visible = true;
+    rig.ui.own_generated = Some("Gold Fox".into());
+    assert!(rig.has("Ready"));
+    assert!(!rig.contains("Visible to people nearby"), "no card on the page");
+    // Calls > Nearby shows the one quiet line (Android OwnNearbyName).
+    let appear = "You appear as Gold Fox \u{b7} changes every 15 min";
+    assert_eq!(rig.texts().iter().filter(|t| *t == appear).count(), 1);
+    rig.click("Ready");
+    assert_eq!(rig.texts().iter().filter(|t| *t == appear).count(), 2, "and the popover");
+    assert!(rig.has("Phones nearby can call this PC while it's awake"));
+    rig.click("Reachable");
+    assert!(!rig.ui.switches.receive_calls);
+    assert!(rig.log().iter().any(|c| matches!(c, Command::Switches(s) if !s.receive_calls)));
+    assert!(rig.has("Hidden"), "phones can't call: Android's word");
+    rig.click("Reachable");
+    assert!(rig.ui.switches.receive_calls);
+    assert!(rig.has("Ready"));
+    // Escape closes it.
+    let _ = rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+    assert!(!rig.has("Reachable"), "the popover closed");
+    // A problem shows its word.
+    rig.ui.bluetooth = Some(Capabilities { radio: Radio::Off, ..caps(true, true) });
+    assert!(rig.has("Bluetooth off"));
 }
-
 
 /// Settings "Your ID" shows this PC's real ID (Android's handle), never a
 /// placeholder once the backend has read it; tapping it shows your code.
@@ -1709,27 +1759,39 @@ fn a_value_that_does_not_fit_moves_under_the_title() {
 
 // ------------------------------------------------------- audit 2026-10-21
 
-/// No live streams on this PC: there is no Live page, Calls is the first
-/// screen, and Ctrl+1 opens Calls (no dead-end first screen).
+/// Live streams can't run on this PC: Live stays first in the navigation
+/// (like Android) and its page says plainly why, instead of disappearing.
 #[test]
-fn without_streams_calls_is_the_first_screen_and_live_is_gone() {
+fn without_streams_live_stays_and_says_why() {
     let mut rig = Rig::full();
     rig.shared.borrow_mut().no_streams = true;
     rig.populate();
-    assert_eq!(rig.ui.page, Page::Home, "the default before the first frame");
     let names = rig.texts();
-    assert_eq!(rig.ui.page, Page::Calls);
-    assert!(!names.iter().any(|n| n == "Live"), "no Live in the navigation: {names:?}");
-    for expected in ["Calls", "Contacts", "Settings"] {
-        assert!(names.iter().any(|n| n == expected), "{expected}");
+    assert_eq!(rig.ui.page, Page::Home, "Live is still the first screen");
+    for expected in ["Live", "Calls", "Contacts", "Settings"] {
+        assert!(names.iter().any(|n| n == expected), "{expected}: {names:?}");
     }
+    assert!(rig.contains("Checking Bluetooth"), "before the first check");
+    let reason = meshlive::stream_watch::unsupported_reason(
+        true,
+        &caps(true, false),
+        Ok("intel"),
+    )
+    .unwrap();
+    rig.send(Update::LiveSupport(Some(reason.clone())));
+    rig.ui.pump();
+    assert!(rig.has(super::screens::STREAMS_NOT_HERE));
+    assert!(rig.contains("Windows 11 version 24H2"), "names what is needed");
+    assert!(rig.has(&reason));
+    assert!(!rig.has("Go live"), "no dead Go live button");
     rig.ui.page = Page::Settings;
     let _ = rig.frame(vec![ctrl(egui::Key::Num1)]);
-    assert_eq!(rig.ui.page, Page::Calls, "Ctrl+1 is the first page shown");
-    // With streams, Live is first again.
+    assert_eq!(rig.ui.page, Page::Home, "Ctrl+1 is Live");
+    // With streams, Live has its list and Go live.
     let mut rig = Rig::full();
     rig.populate();
     assert!(rig.has("Live"));
+    assert!(!rig.has(super::screens::STREAMS_NOT_HERE));
 }
 
 /// The switches no part of the PC reads are hidden (values kept); the real
@@ -1772,4 +1834,167 @@ fn the_empty_calls_list_says_how_a_phone_finds_this_pc() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Calls;
     assert!(rig.contains("Both phones need a current MeshLive. On the phone: Settings \u{203a} Advanced \u{203a} Connection \u{203a} turn on Find PCs."));
+}
+
+/// The video call screen fits the window at any size and display scale (the
+/// sizes are logical points: 1536x864 is 1920x1080 at 125 %): no part of the
+/// picture runs past the window, the controls stay on screen and your own
+/// camera's tile is visible inside the picture area. The other person's
+/// portrait picture keeps its shape.
+#[test]
+fn the_video_call_screen_fits_the_window_with_controls_and_self_view() {
+    let near = |a: f32, b: f32| (a - b).abs() < 1.0;
+    for (w, h) in [(1536.0, 864.0), (1000.0, 720.0), (800.0, 450.0), (640.0, 480.0), (512.0, 384.0)] {
+        let mut rig = Rig::full();
+        rig.size = egui::vec2(w, h);
+        rig.populate();
+        rig.ui.pump();
+        assert!(rig.ui.place_call(10, false));
+        rig.send(Update::CallSignal(remote(ID, Signal::Ringing)));
+        rig.send(Update::CallSignal(remote(ID, Signal::Accept)));
+        rig.send(Update::CallSignal(remote(ID, Signal::CameraOn)));
+        rig.send(Update::CallMediaReady);
+        rig.send(Update::CallCamera(None));
+        rig.send(Update::CallBonded);
+        rig.send(Update::CallMediaInfo { direction: "sending", text: "Sending AV1 video (hardware encoder)".into() });
+        rig.send(Update::CallMediaInfo { direction: "receiving", text: "Receiving VP9 video, 352x288 at 15 fps".into() });
+        // The S24's portrait picture (352x288, one clockwise quarter turn).
+        let peer = std::sync::Arc::new(meshlive::video::PictureSlot::default());
+        peer.publish(352, 288, vec![200; 352 * 288 * 4], 0);
+        peer.set_turns(1);
+        rig.send(Update::CallPictures(PictureHandle(peer)));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, rig.size);
+        assert!(rig.has("Your camera, starting"), "{w}x{h}: the tile shows before the first picture");
+        // Your camera's first picture: 4:3, shown in its own shape.
+        let own = std::sync::Arc::new(meshlive::video::PictureSlot::default());
+        own.publish(160, 120, vec![90; 160 * 120 * 4], 0);
+        rig.send(Update::CallSelfPictures(PictureHandle(own)));
+        let tile = rig.bounds("Your camera", None);
+        let picture_label = rig
+            .texts()
+            .into_iter()
+            .find(|t| t.starts_with("Other person's video"))
+            .expect("the picture area");
+        let area = rig.bounds(&picture_label, None);
+        assert!(screen.contains_rect(area), "{w}x{h}: picture area {area:?} inside the window");
+        assert!(area.contains_rect(tile), "{w}x{h}: your camera {tile:?} inside the picture area {area:?}");
+        assert!(near(tile.width() / tile.height() * 3.0, 4.0), "{w}x{h}: 4:3 tile {tile:?}");
+        for control in ["Mute", "Video off", "End call"] {
+            let b = rig.bounds(control, None);
+            assert!(screen.contains_rect(b), "{w}x{h}: {control} {b:?} on screen");
+            // The controls float over the bottom of the picture, under your camera.
+            assert!(area.contains_rect(b), "{w}x{h}: {control} {b:?} over the picture {area:?}");
+            assert!(b.top() >= tile.bottom(), "{w}x{h}: {control} below your camera's tile");
+        }
+        assert!(!rig.contains("Receiving VP9"), "{w}x{h}: codec lines only under Details");
+        assert_eq!(rig.ui.peer_size, [288, 352], "{w}x{h}: uploaded upright (the sender's quarter turn applied)");
+        let fitted = super::call_layout::fit(area, rig.ui.peer_size, 0).0;
+        assert!(near(fitted.width() / fitted.height() * 352.0, 288.0), "{w}x{h}: portrait, not stretched");
+        assert!(area.contains_rect(fitted.shrink(0.5)));
+        // Camera off: a clear tile instead of nothing.
+        rig.click("Video off");
+        assert!(rig.has("Your camera is off"), "{w}x{h}");
+    }
+}
+
+
+/// A stranger who calls this PC shows the made-up name of its throwaway key
+/// (Android `strangerGeneratedName`), not "Someone nearby"; with Friendly
+/// names off, or once its name label arrives, that wins instead.
+#[test]
+fn a_stranger_caller_shows_its_generated_name() {
+    for friendly in [true, false] {
+        let mut rig = Rig::full();
+        rig.ui.switches.generated_names = friendly;
+        rig.ui.switches.receive_calls = true;
+        rig.send(Update::IncomingCall { peer: "Someone nearby".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: None });
+        rig.send(Update::CallPeerGenerated("Gold Fox".into()));
+        rig.ui.pump();
+        assert_eq!(rig.has("Gold Fox"), friendly, "friendly={friendly}");
+        assert_eq!(rig.has("Someone nearby"), !friendly);
+        rig.send(Update::CallPeerName("Asha".into()));
+        assert!(rig.has("Asha"), "a signed name label replaces it");
+        rig.ui.call = None;
+    }
+    // A verified caller keeps the contact's name.
+    let mut rig = Rig::full();
+    rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: None });
+    rig.send(Update::CallPeerGenerated("Gold Fox".into()));
+    assert!(rig.has("Priya") && !rig.has("Gold Fox"));
+}
+
+/// names-v2 of a throwaway node ID is byte-exact with Android (labels-063
+/// pins the digest; the name comes from the same bundled lists).
+#[test]
+fn a_throwaway_node_id_names_like_android() {
+    let node: Vec<u8> = (0u8..16).collect();
+    let name = meshlive::names::stranger_name(meshlive::names::NameInput::Throwaway(&node)).expect("lists installed");
+    assert_eq!(name.name.split(' ').count(), 2, "{}", name.name);
+    let again = meshlive::names::stranger_name(meshlive::names::NameInput::Throwaway(&node)).unwrap();
+    assert_eq!(name, again, "deterministic");
+    let rdi_form = meshlive::names::stranger_name(meshlive::names::NameInput::Rdi(&node[..6]));
+    assert_ne!(rdi_form.map(|n| n.name), Some(name.name), "a throwaway ID is its own input");
+}
+
+
+/// Streams this PC can't watch (a phone without Private Bluetooth ID) don't
+/// fill Live with greyed-out rows: the watchable ones are listed, the rest
+/// wait behind one plain line with what to ask, and "Show them" lists them.
+#[test]
+fn unwatchable_streams_fold_behind_one_plain_line() {
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.pump();
+    rig.ui.page = Page::Home;
+    let needs = meshlive::stream_watch::NEEDS_PRIVATE_ID;
+    rig.ui.streams[1].unavailable = Some(needs);
+    let first = rig.ui.streams[0].headline();
+    let second = rig.ui.streams[1].headline();
+    assert!(rig.contains(&first));
+    assert!(!rig.contains(&second), "the unwatchable one is folded");
+    assert!(rig.contains(&format!("1 stream nearby can't be watched from this PC. {needs}.")));
+    rig.click("Show them: streams this PC can't watch");
+    assert!(rig.contains(&second));
+    // None watchable: one friendly empty state with the reason, no rows.
+    rig.ui.show_unwatchable = false;
+    rig.ui.streams[0].unavailable = Some(needs);
+    assert!(rig.has("No streams you can watch yet"));
+    assert!(rig.contains(&format!("2 streams nearby can't be watched from this PC. {needs}.")));
+    assert!(!rig.contains(&first) && !rig.contains(&second));
+    assert!(!rig.contains("rotating discovery"), "no jargon");
+}
+
+
+/// Go live's bitrate slider keeps one length at any value and window width,
+/// and its value never sits on top of it (the value is on the line above).
+#[test]
+fn the_bitrate_slider_keeps_its_size_and_its_value_stays_off_it() {
+    use egui::accesskit::Role;
+    for width in [640.0, 1000.0, 1536.0] {
+        let mut rig = Rig::full();
+        rig.size = egui::vec2(width, 1400.0);
+        rig.ui.live_consent_required = true;
+        rig.ui.open_go_live();
+        let mut slider_rects = vec![];
+        for kbps in [100, 1500, 525] {
+            rig.ui.live_settings.kbps = kbps;
+            let slider = {
+                let _ = rig.frame(vec![]);
+                let output = rig.frame(vec![]);
+                let update = output.platform_output.accesskit_update.expect("AccessKit");
+                update.nodes.iter().find(|(_, n)| n.role() == Role::Slider).and_then(|(_, n)| n.bounds())
+                    .map(|b| egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32)))
+                    .expect("the bitrate slider")
+            };
+            let value = rig.bounds(&format!("{kbps} kbps"), None);
+            assert!(!value.intersects(slider), "{width}: {kbps}: value {value:?} over the slider {slider:?}");
+            assert!(value.bottom() <= slider.top() + 0.5, "{width}: the value is on the line above");
+            assert!(slider.right() <= width, "{width}: inside the window");
+            slider_rects.push(slider);
+        }
+        for r in &slider_rects[1..] {
+            assert!((r.width() - slider_rects[0].width()).abs() < 0.5, "{width}: one length at every value: {slider_rects:?}");
+            assert!((r.left() - slider_rects[0].left()).abs() < 0.5, "{width}: it doesn't move");
+        }
+    }
 }

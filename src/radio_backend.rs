@@ -1036,12 +1036,19 @@ struct Worker {
 }
 
 impl Worker {
+    /// Live (Watch and Go live) runs only where Windows and the adapter can
+    /// (24H2 extended advertising, peripheral and central roles, the
+    /// announcement policy); the Live page says why when they can't.
     fn refresh_watch_gate(&mut self) {
-        if !meshlive::stream_watch::enabled() || self.stores.is_none() { return; }
+        if self.stores.is_none() { return; }
+        let enabled = meshlive::stream_watch::enabled();
         let caps = meshlive::bluetooth::probe();
-        let ready = caps.require(true).is_ok() && caps.central == Some(true) && caps.extended_advertising == Some(true)
-            && meshlive::callee::policy(&mut |_, _| {}).is_ok();
+        let policy = if enabled { meshlive::callee::policy(&mut |_, _| {}) } else { Ok("") };
+        let reason = meshlive::stream_watch::unsupported_reason(enabled, &caps, policy);
+        let ready = reason.is_none();
+        if let Some(reason) = reason.as_deref() { trace("live_unsupported", reason); }
         if ready { self.watch_mask = meshlive::stream_watch::decode_mask(); }
+        self.send(Update::LiveSupport(reason));
         self.send(Update::WatchAvailable(ready));
     }
 
@@ -1176,7 +1183,10 @@ impl Worker {
                 Event::Off => {
                     trace("bluetooth_off", "");
                     self.radio_off = true;
-                    if meshlive::stream_watch::enabled() { self.send(Update::WatchAvailable(false)); }
+                    if meshlive::stream_watch::enabled() {
+                        self.send(Update::LiveSupport(Some(meshlive::stream_watch::BLUETOOTH_OFF.into())));
+                        self.send(Update::WatchAvailable(false));
+                    }
                     if self.scan.is_some() {
                         self.scan_interrupted = true;
                         self.stop_scan();
@@ -2289,7 +2299,14 @@ impl Worker {
                                 });
                                 // The real camera, opened now and closed with the video.
                                 let header = &call.dialed.header;
-                                let camera = std::rc::Rc::new(meshlive::call_camera::CallCamera::start(u32::from(header.width), u32::from(header.height)));
+                                // A small mirrored copy of each picture is this PC's self-view on the call screen.
+                                let preview = std::sync::Arc::new(meshlive::video::PictureSlot::default());
+                                let camera = std::rc::Rc::new(meshlive::call_camera::CallCamera::start_with_preview(
+                                    u32::from(header.width),
+                                    u32::from(header.height),
+                                    Some(preview.clone()),
+                                ));
+                                updates.push(Update::CallSelfPictures(crate::ui::backend::PictureHandle(preview)));
                                 let source = camera.clone();
                                 video.use_frames(Box::new(move || source.latest()));
                                 call.camera = Some(camera);
@@ -2676,7 +2693,17 @@ impl Worker {
         } else {
             trace("incoming_ring_sound", &format!("off switch={} attention={attention:?}", self.ringback));
         }
+        let generated = answer
+            .peer_throwaway
+            .filter(|_| answer.peer_name.is_none())
+            .and_then(|node| meshlive::names::stranger_name(meshlive::names::NameInput::Throwaway(&node)))
+            .map(|n| n.name);
         self.send(Update::IncomingCall { peer: peer_name, verified: answer.verified, invite, fingerprint });
+        // A stranger without a name label: the made-up name of its throwaway
+        // key, as Android shows it (the UI uses it while Friendly names is on).
+        if let Some(name) = generated {
+            self.send(Update::CallPeerGenerated(name));
+        }
         // After IncomingCall: the UI marks the call it now has.
         if self.call.as_ref().is_some_and(|c| c.dialed.paired) {
             self.send(Update::CallBonded);

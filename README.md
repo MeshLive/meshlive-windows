@@ -62,8 +62,9 @@ each other directly.
 </tr>
 </table>
 
-**Experimental, off by default:** watching an Android phone's live stream or audio-only radio on the PC, going live
-from the PC to one phone, and outgoing calls through Android relay phones. See [Switches](docs/dev/switches.md).
+**Live (beta, on by default since 0.2.1):** watching an Android phone's live stream or audio-only radio on the PC and
+going live from the PC to one phone. On a PC that cannot do this, the Live tab says what is missing.
+**Experimental, off by default:** outgoing calls through Android relay phones. See [Switches](docs/dev/switches.md).
 
 ## Status
 
@@ -82,8 +83,8 @@ phones running the MeshLive Android app):
 | Phone calls the PC (voice, video) | Worked from four phone models (6 of 6 video calls from one of them), including a stranger's phone and a phone without extended Bluetooth scanning, which finds the PC through the compact announcement |
 | Call across a rotating-ID change | Worked: a 110-second video call across the 15-minute boundary, longest stall 0.2 s |
 | Ringing, missed and blocked calls | Worked: no answer after 60 s ends as Missed call; blocked contacts and unknown callers are declined before ringing |
-| Watch a phone's live stream (experimental) | Worked in bounded runs: about 5 minutes of a phone camera stream (4,439 VP9 frames, pause, resume, end); about 5 minutes of signed audio-only radio, direct and through one Android relay phone. The first picture took 3.2 s, above the 3-second target |
-| Go live from the PC (experimental) | Worked in bounded runs to one phone: 5.5 minutes of audio-only radio; 2 minutes of PC camera video (1,256 frames rendered on the phone). A PC stream relayed onward by a phone did **not** pass, and occasional link stalls still end a stream |
+| Watch a phone's live stream (beta) | Worked in bounded runs: about 5 minutes of a phone camera stream (4,439 VP9 frames, pause, resume, end); about 5 minutes of signed audio-only radio, direct and through one Android relay phone. The first picture took 3.2 s, above the 3-second target |
+| Go live from the PC (beta) | Worked in bounded runs to one phone: 5.5 minutes of audio-only radio; 2 minutes of PC camera video (1,256 frames rendered on the phone). A PC stream relayed onward by a phone did **not** pass, and occasional link stalls still end a stream |
 | Packaged (MSIX) app | Not yet checked end to end; one packaged call dropped right after it was answered |
 
 Not yet checked: Windows 10, ARM64 PCs, Bluetooth adapters other than the one above, sound quality and echo,

@@ -41,8 +41,8 @@ These are stored only on your PC, under your Windows user's app data (`%LOCALAPP
 
 ## Microphone and camera
 
-- The microphone is used only during a call (and, in the experimental Go live, while someone is listening).
-- The camera is used only for your video in a video call, to scan a contact's code, or in the experimental Go live.
+- The microphone is used only during a call (and, when you go live, while someone is listening).
+- The camera is used only for your video in a video call, to scan a contact's code, or when you go live.
 - Both follow your Windows privacy settings, and the app shows when either is on. Muting discards audio that was
   captured but not yet sent.
 
@@ -67,7 +67,7 @@ We list these so you can judge the risk for your own situation.
 - **Phones paired with this PC.** If Windows is paired (bonded) with a phone, that phone's Bluetooth stack recognises
   the PC whenever it connects, even though MeshLive itself talks as a stranger. The call screen says so; remove the
   pairing in Windows Bluetooth settings to call privately. MeshLive never pairs, unpairs or changes pairings.
-- **Going live can expose the PC's address.** The experimental Go live connects to viewers from the PC's Bluetooth
+- **Going live can expose the PC's address.** Go live connects to viewers from the PC's Bluetooth
   address, which may be its fixed public address. The app asks for your consent each time you go live.
 - **Identity is not a person.** A key does not prove who owns a device. Compare codes in person for contacts you care
   about.

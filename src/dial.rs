@@ -355,7 +355,17 @@ impl Dialed {
     }
     /// Receives and feeds the session; returns its notices.
     pub fn pump_input(&mut self, wait: Duration) -> Result<Vec<crate::call_session::Notice>, Error> {
-        let pulled = pull_link(&self.link, &mut self.buffer, wait)?;
+        let link = &self.link;
+        let pulled = if drain_input_enabled() {
+            // Every GATT value already received, not one per worker tick: the
+            // worker also waits for each outgoing notification (about one
+            // connection interval), so one value per tick let a phone's video
+            // pile up here and play seconds late (2026-10-27 S24 calls: the
+            // picture fell 7-18 s behind, at 165-440 ms per second).
+            drain(&mut self.buffer, wait, DRAIN_MAX_BYTES, |buffer, wait| pull_link(link, buffer, wait))?
+        } else {
+            pull_link(link, &mut self.buffer, wait)?
+        };
         // Arrival trains for the report's arrivalKbps (CF-MEDIA-23).
         let start = self.start;
         let arrivals: Vec<(u64, usize)> = self
@@ -383,6 +393,31 @@ impl Dialed {
             count += 1;
         }
     }
+}
+
+/// At most this many bytes are taken in one drain (about 1 s of call media).
+pub const DRAIN_MAX_BYTES: usize = 64 * 1024;
+
+/// Drains the carrier into `buffer` (`MESHLIVE_CALL_DRAIN_INPUT=0`: one value
+/// per worker tick, the earlier control arm).
+pub fn drain_input_enabled() -> bool {
+    std::env::var("MESHLIVE_CALL_DRAIN_INPUT").as_deref() != Ok("0")
+}
+
+/// Pulls once (waiting at most `wait`), then keeps pulling what is already
+/// there without waiting, until nothing is left or `max` bytes were added.
+pub fn drain(
+    buffer: &mut Vec<u8>,
+    wait: Duration,
+    max: usize,
+    mut pull: impl FnMut(&mut Vec<u8>, Duration) -> Result<bool, Error>,
+) -> Result<bool, Error> {
+    let start = buffer.len();
+    if !pull(buffer, wait)? {
+        return Ok(false);
+    }
+    while buffer.len() - start < max && pull(buffer, Duration::ZERO)? {}
+    Ok(true)
 }
 
 /// `pull` for either role.
@@ -890,6 +925,34 @@ mod opening_tests;
 mod tests {
     use super::*;
     use crate::discovery::Announcement;
+
+    #[test]
+    fn input_is_drained_up_to_the_cap_not_one_value_per_tick() {
+        use std::collections::VecDeque;
+        let mut queued: VecDeque<Vec<u8>> = (0..10).map(|i| vec![i; 500]).collect();
+        let mut waits = vec![];
+        let mut pull = |buffer: &mut Vec<u8>, wait: Duration| -> Result<bool, Error> {
+            waits.push(wait);
+            Ok(queued.pop_front().map(|v| buffer.extend(v)).is_some())
+        };
+        let mut buffer = vec![];
+        assert!(drain(&mut buffer, Duration::from_millis(5), 64 * 1024, &mut pull).unwrap());
+        assert_eq!(buffer.len(), 5_000, "every queued value in one tick");
+        assert_eq!(waits[0], Duration::from_millis(5));
+        assert!(waits[1..].iter().all(|w| *w == Duration::ZERO), "only the first pull waits");
+        // Nothing there: no data, one wait.
+        let mut empty = vec![];
+        assert!(!drain(&mut empty, Duration::from_millis(5), 1024, |_, _| Ok(false)).unwrap());
+        // The cap bounds one drain (the rest comes next tick).
+        let mut many: VecDeque<Vec<u8>> = (0..100).map(|_| vec![0; 500]).collect();
+        let mut capped = vec![];
+        drain(&mut capped, Duration::ZERO, 2_000, |b, _| Ok(many.pop_front().map(|v| b.extend(v)).is_some())).unwrap();
+        assert_eq!(capped.len(), 2_000);
+        assert_eq!(many.len(), 96);
+        // A failure is returned as it was.
+        let failed = drain(&mut vec![], Duration::ZERO, 10, |_, _| Err(fail(Stage::Call, "link closed")));
+        assert!(failed.is_err());
+    }
 
     #[test]
     fn a_stranger_dial_requires_the_opening_only_from_a_real_key_v5_callee_with_both_bits() {

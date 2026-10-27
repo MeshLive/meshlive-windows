@@ -103,6 +103,9 @@ def main():
     lock = json.loads((ROOT / 'sources.lock.json').read_text())
     source, cmake = prepare(lock)
     environment = compiler_environment()
+    # Opus asserts with __FILE__; trim it to the source-relative path so no
+    # build-machine folder ends up inside the release exe.
+    environment['_CL_'] = f'/d1trimfile:{source}\\'
     output = ROOT / '.artifacts/native' / args.target / 'opus'
     configure = [str(cmake), '-S', str(source), '-B', str(output), '-G', 'NMake Makefiles',
                  '-DCMAKE_BUILD_TYPE=Release', '-DOPUS_STATIC_RUNTIME=ON',
@@ -112,9 +115,20 @@ def main():
                  '-DOPUS_DRED=OFF', '-DOPUS_OSCE=OFF']
     subprocess.run(configure, env=environment, check=True, creationflags=HIDDEN)
     # NMake is serial; /MP is absent and inherited parallel flags are cleared.
-    subprocess.run([str(cmake), '--build', str(output), '--target', 'opus'], env=environment, check=True, creationflags=HIDDEN)
+    # A library built before path trimming is rebuilt once from clean objects.
+    stamp = output / 'trimmed-file-paths'
+    build = [str(cmake), '--build', str(output), '--target', 'opus']
+    if not stamp.is_file():
+        build.append('--clean-first')
+    subprocess.run(build, env=environment, check=True, creationflags=HIDDEN)
     if not (output / 'opus.lib').is_file():
         raise RuntimeError('Native build did not produce the pinned static library')
+    # Archive member names keep the object paths (they never reach the exe);
+    # the source folder must not appear.
+    library = (output / 'opus.lib').read_bytes().lower()
+    if any(str(source).replace('\\', slash).lower().encode() in library for slash in ('\\', '/')):
+        raise RuntimeError('The static library still embeds the build folder')
+    stamp.write_text('opus built with /d1trimfile\n')
     print('Verified Opus 1.5.2 source/tool bytes; built static CRT with one compiler job.')
 
 

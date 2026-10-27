@@ -280,6 +280,33 @@ mod tests {
             app.set_demo(true);
             std::thread::sleep(std::time::Duration::from_millis(700));
             app.pump();
+            // As a phone sees it: on air, with this PC's generated name.
+            app.pc_visible = true;
+            app.own_generated = Some("Gold Fox".into());
+        }
+        // A video call: the phone's 352x288 picture turned to portrait, and this PC's camera.
+        fn call_with_video(app: &mut Ui) {
+            use crate::ui::backend::{PictureHandle, Update};
+            demo(app);
+            app.place_call(10, false);
+            for _ in 0..4 {
+                std::thread::sleep(std::time::Duration::from_millis(700));
+                app.pump();
+            }
+            let pattern = |w: usize, h: usize| -> Vec<u8> {
+                (0..w * h).flat_map(|i| {
+                    let (x, y) = (i % w, i / w);
+                    [(x * 255 / w) as u8, (y * 255 / h) as u8, 120, 255]
+                }).collect()
+            };
+            let peer = std::sync::Arc::new(meshlive::video::PictureSlot::default());
+            peer.publish(352, 288, pattern(352, 288), 0);
+            peer.set_turns(1);
+            app.apply(Update::CallPictures(PictureHandle(peer)));
+            app.apply(Update::CallCamera(None));
+            let own = std::sync::Arc::new(meshlive::video::PictureSlot::default());
+            own.publish(160, 120, pattern(160, 120), 0);
+            app.apply(Update::CallSelfPictures(PictureHandle(own)));
         }
         let (gpu, context, _) = device(true, true).unwrap();
         for (name, page, width, height, zoom, setup) in [
@@ -311,6 +338,36 @@ mod tests {
                 a.open_go_live();
             }) as Setup),
             ("live-small", Page::Home, 640, 480, 1.0, (|_: &mut Ui| {}) as Setup),
+            // 1920x1080 at 125 % (1536x864 logical), the common laptop screen.
+            ("calls-1536", Page::Calls, 1920, 1080, 1.25, demo as Setup),
+            ("contacts-1536", Page::Contacts, 1920, 1080, 1.25, demo as Setup),
+            ("settings-1536", Page::Settings, 1920, 1080, 1.25, demo as Setup),
+            ("live-1536", Page::Home, 1920, 1080, 1.25, demo as Setup),
+            ("call-1536", Page::Calls, 1920, 1080, 1.25, (|a: &mut Ui| {
+                demo(a);
+                a.place_call(10, false);
+                for _ in 0..4 {
+                    std::thread::sleep(std::time::Duration::from_millis(700));
+                    a.pump();
+                }
+            }) as Setup),
+            ("calls-small", Page::Calls, 640, 480, 1.0, demo as Setup),
+            ("call-video-1536", Page::Calls, 1920, 1080, 1.25, call_with_video as Setup),
+            ("settings-tall", Page::Settings, 1920, 3600, 1.25, demo as Setup),
+            ("golive-settings-1536", Page::Home, 1920, 1080, 1.25, (|a: &mut Ui| {
+                demo(a);
+                a.open_go_live();
+            }) as Setup),
+            ("golive-settings-small", Page::Home, 640, 480, 1.0, (|a: &mut Ui| {
+                demo(a);
+                a.open_go_live();
+            }) as Setup),
+            ("calls-status-1536", Page::Calls, 1920, 1080, 1.25, (|a: &mut Ui| {
+                demo(a);
+                a.switches.receive_calls = true;
+                a.status_open = Some(egui::Rect::from_min_size(egui::pos2(1400.0, 20.0), egui::vec2(100.0, 32.0)));
+            }) as Setup),
+            ("call-video-small", Page::Calls, 640, 480, 1.0, call_with_video as Setup),
             ("live-large-text", Page::Home, 1000, 720, 2.0, (|_: &mut Ui| {}) as Setup),
         ] {
             let mut desc = D3D11_TEXTURE2D_DESC {
@@ -340,6 +397,7 @@ mod tests {
             configure(&ctx);
             ctx.set_zoom_factor(zoom);
             let mut app = Ui::default();
+            app.switches.onboarded = true;
             app.page = page;
             setup(&mut app);
             let mut renderer = egui_directx11::Renderer::new(&gpu).unwrap();

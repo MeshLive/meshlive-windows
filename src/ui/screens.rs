@@ -12,6 +12,10 @@ pub(super) const RESET_MESSAGE: &str = "Forget every verified person? You will n
 const STORE_CORRUPT: &str = "Verified contacts couldn't be loaded. The saved list is damaged or its key was lost, so nobody shows as verified. Calls still work, and the list is kept as it is until you reset it.";
 const STORE_TEMPORARY: &str = "Verified contacts couldn't be loaded. Calls still work, but nobody shows as verified for now. Trying again automatically.";
 
+/// The compact form of `BONDED_NOTE` (the rest is under "Learn more").
+pub(super) const BONDED_SHORT: &str = "This PC is paired with this phone, so the phone can tell it's this PC.";
+pub(super) const NOT_VERIFIED: &str = "Not verified";
+pub(super) const NOT_VERIFIED_HELP: &str = "Not verified. A new call from the same phone shows a new name.";
 pub(super) const BONDED_NOTE: &str = "This PC is paired with this phone in Bluetooth settings, so the phone can tell it is this PC even in a private call. Remove the pairing in Windows Bluetooth settings to call privately.";
 
 /// A takeover screen's title row: Back and the title (Esc is the screen's).
@@ -23,14 +27,13 @@ impl Ui {
     // ------------------------------------------------------------- Home
 
     pub(super) fn home(&mut self, ui: &mut egui::Ui) {
-        // The offline/control arm has no live-stream actions.
+        // Live streams can't run on this PC (old Windows, an adapter that
+        // can't advertise, Bluetooth off): the page stays and says why.
         if !self.backend.streams() {
-            components::empty_state(
-                ui,
-                Icon::Broadcast,
-                STREAMS_NOT_HERE,
-                "Watch and go live from the MeshLive app on your phone.",
-            );
+            match self.live_unsupported.as_deref() {
+                Some(reason) => components::empty_state(ui, Icon::Broadcast, STREAMS_NOT_HERE, reason),
+                None => components::empty_state(ui, Icon::Broadcast, "Live streams", CHECKING_BLUETOOTH),
+            }
             return;
         }
         // Live: the streams nearby, with one pinned Go live below the list.
@@ -67,8 +70,30 @@ impl Ui {
             self.empty_streams(ui);
             return;
         }
-        let video: Vec<_> = self.streams.iter().filter(|s| !s.audio_only).cloned().collect();
-        let radio: Vec<_> = self.streams.iter().filter(|s| s.audio_only).cloned().collect();
+        // Streams this PC can watch come first; the ones it can't wait behind
+        // one plain line (never a wall of greyed-out rows).
+        let (joinable, blocked): (Vec<_>, Vec<_>) = self.streams.iter().cloned().partition(|s| s.unavailable.is_none());
+        let shown = |s: &StreamEntry| s.unavailable.is_none() || self.show_unwatchable;
+        let video: Vec<_> = self.streams.iter().filter(|s| !s.audio_only && shown(s)).cloned().collect();
+        let radio: Vec<_> = self.streams.iter().filter(|s| s.audio_only && shown(s)).cloned().collect();
+        if joinable.is_empty() && !self.show_unwatchable {
+            components::empty_state(ui, Icon::Broadcast, "No streams you can watch yet", &unwatchable_line(&blocked));
+        }
+        let mut toggle = false;
+        if !blocked.is_empty() {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if !joinable.is_empty() || self.show_unwatchable {
+                    ui.label(theme::caption(unwatchable_line(&blocked)));
+                }
+                let label = if self.show_unwatchable { "Hide them" } else { "Show them" };
+                toggle = Pill::new(label).kind(Kind::Quiet).small().a11y(format!("{label}: streams this PC can't watch")).show(ui).clicked();
+            });
+            ui.add_space(8.0);
+        }
+        if toggle {
+            self.show_unwatchable = !self.show_unwatchable;
+        }
         // A wide window shows the streams as a grid of cards.
         if self.split_panes && ui.available_width() >= GRID_FROM {
             for (heading, group) in [(None, &video), (Some("Radio"), &radio)] {
@@ -103,6 +128,7 @@ impl Ui {
         }
     }
     fn empty_streams(&mut self, ui: &mut egui::Ui) {
+        self.show_unwatchable = false;
         let text = if !self.backend.connected() {
             "Searching isn't connected in this build."
         } else if self.searching {
@@ -239,7 +265,9 @@ impl Ui {
         } else {
             let height = (ui.available_height() - bar - 52.0).max(120.0);
             let texture = if state != WatchState::Playing || watch.source_state.camera_off { None } else { self.video };
-            picture(ui, "Live video", &status, texture, height);
+            let backdrop = self.peer_backdrop.as_ref().map(|t| t.id());
+            // The same video area as a call: upright, never stretched to 16:9.
+            video_stage(ui, egui::vec2(ui.available_width(), height), "Live video", &status, texture.map(|id| (id, self.peer_size)), backdrop);
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label(theme::body(&status));
@@ -343,58 +371,17 @@ impl Ui {
             self.recent_calls(ui);
             return;
         }
-        // The made-up name strangers see for this PC, as Android's Calls page.
-        if let Some(name) = self.appear_as().map(str::to_owned) {
-            components::line_with_info(ui, "appear-as", &format!("You appear as {name} \u{b7} changes every 15 min"), "About your generated name", crate::ui::APPEAR_AS_INFO);
-            ui.add_space(12.0);
-        }
         if let Some(reason) = self.unavailable_reason(Feature::CallOut) {
             components::notice(ui, &format!("Unavailable. {reason}"), None);
             ui.add_space(8.0);
         }
-        // Whether phones can ring this PC: one plain line, a reset only when the store is damaged.
-        let visibility = if self.pc_visible {
-            // CF-PRES-07: on the air with ephemeral IDs while the presence
-            // store is damaged; the note offers its reset.
-            let damaged = self.visibility_note.clone().filter(|n| n.contains(crate::ui::KEYS_DAMAGED));
-            Some(("Visible to people nearby", damaged.clone().unwrap_or_else(|| format!("Phones nearby can call this PC. {}.", crate::ui::AWAKE_NOTE)), damaged.is_some()))
-        } else {
-            self.visibility_note
-                .clone()
-                .filter(|_| self.usable(Feature::ReceiveCalls) && self.switches.receive_calls)
-                // CF-PRES-07: only a latched damaged store offers the reset.
-                .map(|note| ("Not visible to people nearby", note.clone(), note.contains(crate::ui::KEYS_DAMAGED)))
-        };
-        if let Some((title, note, damaged)) = visibility {
-            let mut reset = false;
-            ui.horizontal_top(|ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 22.0), egui::Sense::hover());
-                let dot = if self.pc_visible { Color32::WHITE } else { SECONDARY };
-                ui.painter().circle_filled(rect.center(), 4.0, dot);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(emphasis(title));
-                    ui.add(egui::Label::new(RichText::new(note).size(14.0).color(SECONDARY)).wrap());
-                    if damaged {
-                        ui.add_space(6.0);
-                        reset = Pill::new("Reset").kind(Kind::Secondary).small().a11y("Reset this PC's contact keys").show(ui).clicked();
-                    }
-                });
-            });
-            if reset {
-                self.backend.command(Command::ResetPresenceKey);
-            }
-            ui.add_space(12.0);
-        }
-        if !self.usable(Feature::ReceiveCalls) {
-            if let Some(reason) = self.unavailable_reason(Feature::ReceiveCalls) {
-                if self.usable(Feature::CallOut) {
-                    // Outgoing calls work; say plainly that incoming ones do not.
-                    ui.label(emphasis("Allow calls"));
-                    components::notice(ui, &format!("Unavailable. {reason}"), None);
-                    ui.add_space(8.0);
-                }
-            }
+        // Whether phones can ring this PC (and why not) and the Reachable
+        // switch live in the status indicator's popover (top right), as on
+        // Android; Calls > Nearby keeps one quiet line with the made-up name
+        // strangers see (Android OwnNearbyName), so two people can match up.
+        if let Some(name) = self.appear_as().map(str::to_owned) {
+            components::line_with_info(ui, "appear-as-calls", &format!("You appear as {name} \u{b7} changes every 15 min"), "About your generated name", crate::ui::APPEAR_AS_INFO);
+            ui.add_space(8.0);
         }
         let people = self.people.clone();
         if people.is_empty() {
@@ -429,7 +416,7 @@ impl Ui {
             components::section_header(ui, heading);
             let count = group.len();
             for (index, person) in group.into_iter().enumerate() {
-                let (call, picked) = self.person_card(ui, person.id, &person.name, &person.subtitle(), can_call, verified, index + 1 == count, wide);
+                let (call, picked, _) = self.person_card(ui, person.id, &person.name, &person.subtitle(), can_call, verified, index + 1 == count, wide, None);
                 if picked {
                     self.selected_person = Some(person.id);
                 }
@@ -449,8 +436,12 @@ impl Ui {
     /// call buttons (voice grey, video white). Returns Some(voice) when pressed.
     /// In a wide window the row also selects the person (second value).
     #[allow(clippy::too_many_arguments)]
-    fn person_card(&self, ui: &mut egui::Ui, _id: Handle, name: &str, details: &str, enabled: bool, saved: bool, last: bool, selectable: bool) -> (Option<bool>, bool) {
+    /// A person's row with the two calls; `more` (Some(open)) adds a quiet
+    /// "More" toggle for a contact's other actions, returned as the third value.
+    #[allow(clippy::too_many_arguments)]
+    fn person_card(&self, ui: &mut egui::Ui, _id: Handle, name: &str, details: &str, enabled: bool, saved: bool, last: bool, selectable: bool, more: Option<bool>) -> (Option<bool>, bool, bool) {
         let voice_ok = enabled && self.switches.voice_calls;
+        let mut toggled = false;
         let (row, call) = ListRow::new(name)
             .subtitle(details)
             .leading(Leading::Avatar(if saved { name.to_owned() } else { String::new() }))
@@ -468,9 +459,13 @@ impl Ui {
                 if voice.clicked() {
                     result = Some(true);
                 }
+                if let Some(open) = more {
+                    let icon = if open { Icon::ChevronDown } else { Icon::Chevron };
+                    toggled = components::icon_button_sized(ui, icon, &format!("More for {name}"), Kind::Quiet, theme::ICON_BUTTON).clicked();
+                }
                 result
             });
-        (call, selectable && row.clicked())
+        (call, selectable && row.clicked(), toggled)
     }
     fn recent_calls(&mut self, ui: &mut egui::Ui) {
         if self.recent.is_empty() {
@@ -551,7 +546,6 @@ impl Ui {
         let verified = call.verified;
         let (muted, talking, camera, voice) = (call.muted, call.talking, call.camera, call.voice);
         let mic_state = if self.call_mic_restarting { None } else { self.call_mic.clone() };
-        let mic_muted = muted && !(self.accurate_call_media && talking);
         let camera_state = self.call_camera.clone();
         let peer_camera = call.peer_camera;
         let outgoing = call.outgoing;
@@ -573,14 +567,17 @@ impl Ui {
         let active = matches!(phase, Phase::Active | Phase::NegotiatingMedia);
         let video = active && (peer_camera || camera);
         let ringing_out = matches!(phase, Phase::OutgoingInvite | Phase::OutgoingRinging);
-        let name = if verified || outgoing { peer.clone() } else { format!("{peer}, not checked") };
+        let name = peer.clone();
+        // Android shows an unverified caller's name with a small quiet tag.
+        let unverified = !verified && !outgoing;
+        let encrypted = phase == Phase::Active;
         let bar_height = match phase {
             Phase::IncomingRinging => 112.0,
             Phase::Ended => 64.0,
             _ => 100.0,
         };
 
-        // ---- name, state and the plain facts about this call
+        // ---- name, state and the plain facts about this call (Android's call header)
         let header = |ui: &mut egui::Ui, centred: bool| {
             let layout = if centred { egui::Layout::top_down(egui::Align::Center) } else { egui::Layout::top_down(egui::Align::Min) };
             ui.with_layout(layout, |ui| {
@@ -593,62 +590,71 @@ impl Ui {
                 );
                 if verified {
                     verified_mark(ui.painter(), egui::pos2(title.rect.right() + 16.0, title.rect.center().y), 18.0);
+                } else if unverified {
+                    // A small, quiet tag (the details are one hover away).
+                    let font = egui::FontId::proportional(12.0);
+                    let galley = ui.painter().layout_no_wrap(NOT_VERIFIED.to_owned(), font, SECONDARY);
+                    let tag = egui::Rect::from_min_size(
+                        egui::pos2(title.rect.right() + 10.0, title.rect.center().y - galley.size().y * 0.5 - 3.0),
+                        galley.size() + egui::vec2(14.0, 6.0),
+                    );
+                    if !centred {
+                        ui.painter().rect_stroke(tag, 8, egui::Stroke::new(1.0, Color32::from_gray(70)), egui::StrokeKind::Inside);
+                        ui.painter().galley(tag.min + egui::vec2(7.0, 3.0), galley, SECONDARY);
+                        ui.interact(tag, ui.id().with("not-verified"), egui::Sense::hover())
+                            .on_hover_text(NOT_VERIFIED_HELP)
+                            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, NOT_VERIFIED));
+                    }
+                }
+                if centred && unverified {
+                    ui.label(RichText::new(NOT_VERIFIED).size(13.0).color(SECONDARY));
                 }
                 ui.horizontal(|ui| {
+                    let state_width = ui.painter().layout_no_wrap(status.clone(), egui::FontId::proportional(17.0), SECONDARY).size().x
+                        + elapsed.map_or(0.0, |_| 64.0)
+                        + if encrypted { 22.0 } else { 0.0 };
                     if centred {
                         // Centre the state line under the name.
-                        let width = ui.painter().layout_no_wrap(status.clone(), egui::FontId::proportional(17.0), SECONDARY).size().x
-                            + elapsed.map_or(0.0, |_| 64.0);
-                        ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+                        ui.add_space(((ui.available_width() - state_width) / 2.0).max(0.0));
                     }
                     ui.label(RichText::new(&status).size(17.0).color(SECONDARY));
                     if let Some(seconds) = elapsed {
                         ui.label(RichText::new(clock(seconds)).size(17.0).color(Color32::WHITE).monospace());
                     }
+                    if encrypted {
+                        // A small lock: end-to-end encrypted.
+                        let (rect, response) = ui.allocate_exact_size(egui::vec2(16.0, 18.0), egui::Sense::hover());
+                        draw_icon(ui.painter(), rect, Icon::Lock, SECONDARY);
+                        response
+                            .on_hover_text(if verified { "Encrypted, direct" } else { "Encrypted" })
+                            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, if verified { "Encrypted, direct" } else { "Encrypted" }));
+                    }
                 });
             });
         };
+        // A paired phone: one compact line, the whole explanation on "Learn more".
         let facts = |ui: &mut egui::Ui, centred: bool| {
-            let mut lines: Vec<String> = vec![];
-            if !verified && !outgoing {
-                lines.push("Not verified. A new call from the same phone shows a new name.".into());
+            if !bonded {
+                return;
             }
-            if bonded {
-                lines.push(BONDED_NOTE.into());
-            }
+            let more_id = egui::Id::new("call-bonded-more");
+            let mut more = ui.data(|d| d.get_temp::<bool>(more_id).unwrap_or(false));
             let layout = if centred { egui::Layout::top_down(egui::Align::Center) } else { egui::Layout::top_down(egui::Align::Min) };
             ui.with_layout(layout, |ui| {
-                ui.set_max_width(ui.available_width().min(560.0));
-                ui.spacing_mut().item_spacing.y = 4.0;
-                for line in lines {
-                    ui.add(egui::Label::new(RichText::new(line).size(13.0).color(SECONDARY)).wrap());
-                }
-                let mut parts: Vec<String> = vec![];
-                if phase == Phase::Active {
-                    parts.push(if verified { "Encrypted, direct" } else { "Encrypted" }.into());
-                }
-                if active {
-                    if let Some(None) = &mic_state {
-                        parts.push(if mic_muted { "Microphone on \u{b7} muted" } else { "Microphone on" }.into());
+                ui.set_max_width(ui.available_width().min(640.0));
+                ui.horizontal_wrapped(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 18.0), egui::Sense::hover());
+                    draw_icon(ui.painter(), rect, Icon::Info, SECONDARY);
+                    ui.label(RichText::new(BONDED_SHORT).size(13.0).color(SECONDARY));
+                    if Pill::new(if more { "Less" } else { "Learn more" }).kind(Kind::Quiet).small().show(ui).clicked() {
+                        more = !more;
                     }
-                    if camera && matches!(&camera_state, Some(None)) {
-                        parts.push("Camera on".into());
-                    }
-                }
-                if !parts.is_empty() {
-                    ui.horizontal(|ui| {
-                        if centred {
-                            let width = ui.painter().layout_no_wrap(parts.join("   "), egui::FontId::proportional(13.0), SECONDARY).size().x + 20.0;
-                            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
-                        }
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 16.0), egui::Sense::hover());
-                        draw_icon(ui.painter(), rect, Icon::Lock, SECONDARY);
-                        for part in parts {
-                            ui.label(RichText::new(part).size(13.0).color(SECONDARY));
-                        }
-                    });
+                });
+                if more {
+                    ui.add(egui::Label::new(RichText::new(BONDED_NOTE).size(13.0).color(SECONDARY)).wrap());
                 }
             });
+            ui.data_mut(|d| d.insert_temp(more_id, more));
         };
 
         let mut open_settings = false;
@@ -666,70 +672,131 @@ impl Ui {
             }
         };
 
-        if video {
-            // ---- video: header left, the picture fills the middle, your camera in the corner
-            header(ui, false);
-            facts(ui, false);
-            problems(ui, &mut open_settings, &mut open_camera_settings);
-            ui.add_space(8.0);
-            let media = self.call_media_lines();
-            let media_height = media.len() as f32 * 18.0;
-            let height = (ui.available_height() - bar_height - media_height - 16.0).max(120.0);
-            let texture = if phase == Phase::Active && peer_camera { self.video } else { None };
-            let rect = fitted_picture(
-                ui,
-                "Other person's video",
-                if peer_camera { "Connecting\u{2026}" } else { "Video off" },
-                texture.map(|id| (id, self.peer_size, self.peer_turns)),
-                height,
-            );
-            if camera {
-                // Your own picture's place (bottom right of the call picture).
-                // It grows with the window (180 x 110 at the default size).
-                let pip_w = (rect.width() * 0.18).clamp(180.0, 360.0);
-                let pip_size = egui::vec2(pip_w, pip_w * 110.0 / 180.0);
-                let pip = egui::Rect::from_min_size(rect.right_bottom() - pip_size - egui::vec2(16.0, 16.0), pip_size);
-                if pip.left() > rect.left() + 40.0 && pip.top() > rect.top() + 40.0 {
-                    let painter = ui.painter();
-                    painter.rect_filled(pip, 12.0, theme::RAISED);
-                    painter.rect_stroke(pip, 12.0, egui::Stroke::new(1.0, Color32::from_gray(70)), egui::StrokeKind::Inside);
-                    draw_icon(painter, egui::Rect::from_center_size(pip.center() - egui::vec2(0.0, 8.0), egui::vec2(22.0, 22.0)), Icon::Camera, SECONDARY);
-                    painter.text(pip.center() + egui::vec2(0.0, 18.0), egui::Align2::CENTER_CENTER, "You", egui::FontId::proportional(13.0), SECONDARY);
+        // The control bar's place is reserved first, so it is on screen in any
+        // window size; the name, facts and picture share the space above it
+        // (clipped there, never pushing the controls out of the window). In a
+        // video call the picture runs to the bottom and the controls float
+        // over it, as on Android.
+        let full = ui.available_rect_before_wrap();
+        let reserve = if video { 0.0 } else { bar_height };
+        let top_rect = egui::Rect::from_min_max(full.min, egui::pos2(full.right(), (full.bottom() - reserve).max(full.top())));
+        let mut top = ui.new_child(egui::UiBuilder::new().max_rect(top_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+        top.set_clip_rect(top_rect.intersect(ui.clip_rect()));
+        {
+            let ui = &mut top;
+            if video {
+                // ---- video: a compact header, the picture as the hero, your camera in the corner
+                let media: Vec<String> = self.call_media_lines().into_iter().map(str::to_owned).collect();
+                let mut toggle_details = false;
+                let details_open = self.call_details_open;
+                let has_details = media.iter().any(|l| !plain_media_line(l));
+                ui.horizontal(|ui| {
+                    // One line, so the picture gets the height: name, a quiet
+                    // tag, state, timer and lock; Details at the end.
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.label(
+                        RichText::new(&name)
+                            .size(20.0)
+                            .family(egui::FontFamily::Name("Heading".into()))
+                            .color(Color32::WHITE),
+                    );
+                    if verified {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                        verified_mark(ui.painter(), rect.center(), 18.0);
+                    } else if unverified {
+                        components::tag(ui, NOT_VERIFIED).on_hover_text(NOT_VERIFIED_HELP);
+                    }
+                    ui.label(RichText::new(&status).size(15.0).color(SECONDARY));
+                    if let Some(seconds) = elapsed {
+                        ui.label(RichText::new(clock(seconds)).size(15.0).color(Color32::WHITE).monospace());
+                    }
+                    if encrypted {
+                        let label = if verified { "Encrypted, direct" } else { "Encrypted" };
+                        let (rect, response) = ui.allocate_exact_size(egui::vec2(16.0, 18.0), egui::Sense::hover());
+                        draw_icon(ui.painter(), rect, Icon::Lock, SECONDARY);
+                        response.on_hover_text(label).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+                    }
+                    if has_details {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            toggle_details = Pill::new(if details_open { "Hide details" } else { "Details" })
+                                .kind(Kind::Quiet)
+                                .small()
+                                .show(ui)
+                                .clicked();
+                        });
+                    }
+                });
+                if toggle_details {
+                    self.call_details_open = !self.call_details_open;
                 }
-            }
-            // CF-OUT-07: the codec and encoder really in use, or the fallback.
-            for line in media {
-                ui.label(RichText::new(line).size(12.0).color(SECONDARY));
-            }
-        } else {
-            // ---- no picture: the person's mark, name and state, centred
-            let free = ui.available_height() - bar_height;
-            ui.add_space((free * 0.16).max(12.0));
-            ui.vertical_centered(|ui| {
-                let rect = components::avatar(ui, if verified || outgoing { &peer } else { "" }, 120.0).rect;
-                if phase == Phase::IncomingRinging {
-                    // A quiet ring around the mark while it rings.
-                    ui.painter().circle_stroke(rect.center(), 70.0, egui::Stroke::new(1.5, Color32::from_gray(60)));
-                }
-            });
-            ui.add_space(24.0);
-            header(ui, true);
-            ui.add_space(6.0);
-            facts(ui, true);
-            if phase == Phase::IncomingRinging {
-                if let Some(name) = self.answer_as.clone() {
-                    ui.vertical_centered(|ui| ui.label(RichText::new(format!("You appear as {name}")).size(14.0).color(SECONDARY)));
-                }
-            }
-            ui.add_space(8.0);
-            ui.vertical_centered(|ui| {
-                ui.set_max_width(560.0);
+                facts(ui, false);
                 problems(ui, &mut open_settings, &mut open_camera_settings);
-                // The shared header also exists on voice calls; it does not prove video is flowing.
-                for line in self.call_media_lines() {
-                    ui.label(RichText::new(line).size(12.0).color(SECONDARY));
+                // CF-OUT-07: a fallback is always said; the codec and encoder in use only under Details.
+                self.call_detail_lines(ui, media);
+                ui.add_space(8.0);
+                let height = ui.available_height().max(48.0);
+                let texture = if phase == Phase::Active && peer_camera { self.video } else { None };
+                let backdrop = self.peer_backdrop.as_ref().map(|t| t.id());
+                let area = video_stage(
+                    ui,
+                    egui::vec2(ui.available_width(), height),
+                    "Other person's video",
+                    if peer_camera { "Connecting\u{2026}" } else { "Video off" },
+                    texture.map(|id| (id, self.peer_size)),
+                    backdrop,
+                );
+                // The controls float over the bottom of the picture: a soft shade keeps them readable.
+                if texture.is_some() {
+                    // A soft shade from clear to dark keeps the floating controls readable.
+                    let top = (area.bottom() - bar_height - 40.0).max(area.top());
+                    let mut shade = egui::Mesh::default();
+                    let (clear, dark) = (Color32::TRANSPARENT, Color32::from_black_alpha(150));
+                    shade.colored_vertex(egui::pos2(area.left(), top), clear);
+                    shade.colored_vertex(egui::pos2(area.right(), top), clear);
+                    shade.colored_vertex(egui::pos2(area.right(), area.bottom()), dark);
+                    shade.colored_vertex(egui::pos2(area.left(), area.bottom()), dark);
+                    shade.add_triangle(0, 1, 2);
+                    shade.add_triangle(0, 2, 3);
+                    ui.painter().add(egui::Shape::mesh(shade));
                 }
-            });
+                // Your own camera rests bottom right above the controls (like
+                // Android's picture-in-picture); with the camera off, a clear tile says so.
+                let own = if camera && matches!(camera_state, Some(None)) {
+                    SelfView::Picture(self.self_video())
+                } else {
+                    SelfView::Off
+                };
+                let pip_area = egui::Rect::from_min_max(area.min, egui::pos2(area.right(), (area.bottom() - bar_height).max(area.top())));
+                self_view_tile(ui, pip_area, own);
+            } else {
+                // ---- no picture: the person's mark, name and state, centred
+                let free = ui.available_height();
+                ui.add_space((free * 0.16).max(12.0));
+                ui.vertical_centered(|ui| {
+                    let rect = components::avatar(ui, if verified || outgoing { &peer } else { "" }, 120.0).rect;
+                    if phase == Phase::IncomingRinging {
+                        // A quiet ring around the mark while it rings.
+                        ui.painter().circle_stroke(rect.center(), 70.0, egui::Stroke::new(1.5, Color32::from_gray(60)));
+                    }
+                });
+                ui.add_space(24.0);
+                header(ui, true);
+                ui.add_space(6.0);
+                facts(ui, true);
+                if phase == Phase::IncomingRinging {
+                    if let Some(name) = self.answer_as.clone() {
+                        ui.vertical_centered(|ui| ui.label(RichText::new(format!("You appear as {name}")).size(14.0).color(SECONDARY)));
+                    }
+                }
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(560.0);
+                    problems(ui, &mut open_settings, &mut open_camera_settings);
+                    // The shared header also exists on voice calls; it does not prove video is flowing.
+                    let media: Vec<String> = self.call_media_lines().into_iter().map(str::to_owned).collect();
+                    self.call_details(ui, media);
+                });
+            }
         }
         if open_settings {
             open_microphone_settings();
@@ -875,7 +942,7 @@ impl Ui {
             self.place_call(contact.id, voice);
         }
         ui.add_space(16.0);
-        self.contact_extras(ui, &contact, 0.0);
+        self.contact_extras(ui, &contact, 0.0, true);
     }
     fn contacts_list(&mut self, ui: &mut egui::Ui, wide: bool) {
         // "Add contact" is pinned at the bottom by the shell (Ui::page_footer).
@@ -912,9 +979,15 @@ impl Ui {
             // A lease lets this PC find them by their rotating ID; a call then
             // looks for them for up to 10 s even when the list has not seen them.
             let enabled = can_call && contact.lease;
-            let (call, picked) = self.person_card(ui, contact.id, &contact.name, &contact.subtitle(), enabled, true, wide || index + 1 == count, wide);
+            // Rename, Safety code, Block and Forget wait behind "More" (Android's
+            // contact sheet), so the list is names and calls only.
+            let open = self.contact_more == Some(contact.id);
+            let (call, picked, toggled) = self.person_card(ui, contact.id, &contact.name, &contact.subtitle(), enabled, true, wide || index + 1 == count, wide, (!wide).then_some(open));
             if picked {
                 self.selected_contact = Some(contact.id);
+            }
+            if toggled {
+                self.contact_more = if open { None } else { Some(contact.id) };
             }
             if let Some(voice) = call {
                 self.place_call(contact.id, voice);
@@ -922,7 +995,7 @@ impl Ui {
             if wide {
                 continue;
             }
-            self.contact_extras(ui, &contact, theme::ROW_TEXT_INSET);
+            self.contact_extras(ui, &contact, theme::ROW_TEXT_INSET, self.contact_more == Some(contact.id));
             ui.add_space(6.0);
             if index + 1 < count {
                 divider(ui, theme::ROW_TEXT_INSET);
@@ -930,9 +1003,9 @@ impl Ui {
         }
     }
     /// A contact's quiet actions and notes (under the row, or in the detail pane).
-    fn contact_extras(&mut self, ui: &mut egui::Ui, contact: &Contact, inset: f32) {
+    fn contact_extras(&mut self, ui: &mut egui::Ui, contact: &Contact, inset: f32, actions: bool) {
         {
-            ui.horizontal(|ui| {
+            if actions { ui.horizontal(|ui| {
                 ui.add_space((inset - 10.0).max(0.0));
                 ui.spacing_mut().item_spacing.x = 2.0;
                 if text_action(ui, "Rename", &format!("Rename {}", contact.name)).clicked() {
@@ -949,7 +1022,7 @@ impl Ui {
                 if text_action(ui, "Forget", &format!("Forget {}", contact.name)).clicked() {
                     self.forget = Some(contact.id);
                 }
-            });
+            }); }
             let caption = |ui: &mut egui::Ui, text: String| {
                 ui.horizontal(|ui| {
                     ui.add_space(inset);
@@ -1170,7 +1243,16 @@ impl Ui {
             ui.add_space(12.0);
         }
         if let Some(note) = self.live_note.as_deref() { components::notice(ui, note, None); ui.add_space(8.0); }
-        egui::ScrollArea::vertical().id_salt("golive").auto_shrink([false, false]).show(ui, |ui| {
+        // Before going live, the Go live button is pinned under the settings
+        // (they scroll), so it is on screen at any window height.
+        let pinned = if running { 0.0 } else { theme::BUTTON_HEIGHT_LARGE + 24.0 };
+        let mut start_clicked = false;
+        let ready = gate.is_none() && self.golive.title_valid();
+        egui::ScrollArea::vertical()
+            .id_salt("golive")
+            .auto_shrink([false, false])
+            .max_height((ui.available_height() - pinned).max(0.0))
+            .show(ui, |ui| {
             if !running {
                 ui.horizontal(|ui| {
                     for (label, kind) in [("Video and audio", LiveKind::Video), ("Audio only", LiveKind::AudioOnly)] {
@@ -1201,7 +1283,8 @@ impl Ui {
                         }});
                         ui.horizontal_wrapped(|ui| { for fps in [15, 24, 30] { if chip(ui, &format!("{fps} fps"), self.live_settings.fps == fps, true).clicked() { self.live_settings.fps = fps; } }});
                         ui.horizontal_wrapped(|ui| { for (label, codec) in [("VP9", 2), ("AV1 (hardware)", 3)] { if chip(ui, label, self.live_settings.codec == codec, true).clicked() { self.live_settings.codec = codec; } }});
-                        ui.add(egui::Slider::new(&mut self.live_settings.kbps, 100..=1500).step_by(25.0).text("kbps"));
+                        ui.add_space(8.0);
+                        components::value_slider(ui, "Video bitrate", &mut self.live_settings.kbps, 100..=1500, 25, "kbps");
                     } else {
                         ui.horizontal_wrapped(|ui| { for (label, preset) in [("Low data · 16 kbps", 1), ("Voice · 24 kbps", 2), ("Music · 48 kbps", 3)] {
                             if chip(ui, label, self.live_settings.radio_preset == preset, true).clicked() { self.live_settings.radio_preset = preset; }
@@ -1218,20 +1301,6 @@ impl Ui {
                 if let Some(error) = self.golive.error {
                     ui.add_space(8.0);
                     ui.label(error);
-                }
-                ui.add_space(16.0);
-                let ready = gate.is_none() && self.golive.title_valid();
-                let start = components::live_button(ui, "Go live", ready);
-                if focus && ready {
-                    start.request_focus();
-                }
-                if start.clicked() {
-                    if self.golive.kind == LiveKind::AudioOnly && !self.golive.disclosed {
-                        self.audio_disclosure = true;
-                        self.focus_primary = true;
-                    } else {
-                        self.start_live();
-                    }
                 }
             } else {
                 live_badge(ui, &self.golive.status());
@@ -1297,6 +1366,22 @@ impl Ui {
                 ui.label(RichText::new("Not live").color(SECONDARY));
             }
         });
+        if !running {
+            ui.add_space(12.0);
+            let start = components::live_button(ui, "Go live", ready);
+            if focus && ready {
+                start.request_focus();
+            }
+            start_clicked = start.clicked();
+        }
+        if start_clicked {
+            if self.golive.kind == LiveKind::AudioOnly && !self.golive.disclosed {
+                self.audio_disclosure = true;
+                self.focus_primary = true;
+            } else {
+                self.start_live();
+            }
+        }
         if back {
             // A running broadcast keeps running; Back only closes this screen.
             self.golive_open = false;
@@ -1320,7 +1405,7 @@ const GRID_FROM: f32 = 900.0;
 /// A stream card is at least this wide.
 const CARD_MIN: f32 = 320.0;
 /// The Live page on a backend without live streams.
-pub(super) const STREAMS_NOT_HERE: &str = "Live streams aren't on Windows yet";
+pub(super) const STREAMS_NOT_HERE: &str = "Live streams aren't available on this PC";
 
 /// The shown BVMID2 code as a QR picture: dark modules on white with the
 /// four-module quiet zone, sized to scan from a phone held near the screen.
@@ -1357,42 +1442,141 @@ fn open_settings_page(page: &str) {
     let _ = page;
 }
 
-/// The call picture: the area as `picture`, the image fitted by its aspect
-/// ratio after the peer's display rotation (quarter turns, clockwise).
-fn fitted_picture(
+/// A media line a person needs to read ("Voice only: ..."); the rest
+/// (codec, encoder, size, frame rate) is technical and waits under Details.
+fn plain_media_line(line: &str) -> bool {
+    line.starts_with("Voice only")
+}
+
+impl Ui {
+    /// CF-OUT-07 on the call screen in plain words: a fallback ("Voice only")
+    /// is always shown; the codec and encoder in use sit under a collapsed
+    /// "Details" (never only in a trace).
+    fn call_details(&mut self, ui: &mut egui::Ui, lines: Vec<String>) {
+        let (plain, technical): (Vec<_>, Vec<_>) = lines.into_iter().partition(|l| plain_media_line(l));
+        for line in plain {
+            ui.label(RichText::new(line).size(13.0).color(SECONDARY));
+        }
+        if technical.is_empty() {
+            return;
+        }
+        let label = if self.call_details_open { "Hide details" } else { "Details" };
+        if Pill::new(label).kind(Kind::Quiet).small().show(ui).clicked() {
+            self.call_details_open = !self.call_details_open;
+        }
+        if self.call_details_open {
+            for line in technical {
+                ui.label(RichText::new(line).size(12.0).color(SECONDARY));
+            }
+        }
+    }
+    /// `call_details` without its own toggle (the video header carries it).
+    fn call_detail_lines(&mut self, ui: &mut egui::Ui, lines: Vec<String>) {
+        for line in lines {
+            if plain_media_line(&line) {
+                ui.label(RichText::new(line).size(13.0).color(SECONDARY));
+            } else if self.call_details_open {
+                ui.label(RichText::new(line).size(12.0).color(SECONDARY));
+            }
+        }
+    }
+}
+
+/// The video area: the picture as large as fits (FIT, never stretched,
+/// already upright), with rounded corners; the sides it leaves are filled
+/// with a dark, blurred copy of itself (no empty framed box). Without a
+/// picture, a quiet panel with the state.
+pub(super) fn video_stage(
     ui: &mut egui::Ui,
+    size: egui::Vec2,
     name: &str,
     status: &str,
-    texture: Option<(egui::TextureId, [u32; 2], u8)>,
-    max_height: f32,
+    texture: Option<(egui::TextureId, [u32; 2])>,
+    backdrop: Option<egui::TextureId>,
 ) -> egui::Rect {
-    // The call picture fills the space it is given (the image keeps its
-    // aspect ratio inside it), like a camera viewfinder.
-    let width = ui.available_width();
-    let height = max_height.max(120.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size.x.max(0.0), size.y.max(0.0)), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("{name}. {status}")));
-    ui.painter().rect_filled(rect, 16, Color32::from_gray(10));
+    let radius = 16;
     match texture {
-        Some((id, [w, h], turns)) => {
-            let (shown_w, shown_h) = if turns % 2 == 1 { (h as f32, w as f32) } else { (w as f32, h as f32) };
-            let scale = (rect.width() / shown_w.max(1.0)).min(rect.height() / shown_h.max(1.0));
-            // The unrotated image rectangle, centred; rotation turns it into the fitted one.
-            let size = egui::vec2(w as f32 * scale, h as f32 * scale);
-            let image = egui::Rect::from_center_size(rect.center(), size);
-            let mut mesh = egui::Mesh::with_texture(id);
-            mesh.add_rect_with_uv(image, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-            if turns % 4 != 0 {
-                mesh.rotate(egui::emath::Rot2::from_angle(f32::from(turns % 4) * std::f32::consts::FRAC_PI_2), rect.center());
+        Some((id, picture)) => {
+            match backdrop {
+                Some(soft) => {
+                    egui::Image::new((soft, rect.size()))
+                        .uv(call_layout::fill_uv(rect, picture))
+                        .tint(Color32::from_gray(64))
+                        .corner_radius(radius)
+                        .paint_at(ui, rect);
+                }
+                None => {
+                    ui.painter().rect_filled(rect, radius, Color32::BLACK);
+                }
             }
-            ui.painter().add(egui::Shape::mesh(mesh));
+            let (shown, _) = call_layout::fit(rect, picture, 0);
+            egui::Image::new((id, shown.size())).corner_radius(radius).paint_at(ui, shown);
         }
         None => {
+            ui.painter().rect_filled(rect, radius, Color32::from_gray(14));
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, status, egui::FontId::proportional(18.0), SECONDARY);
         }
     }
-    ui.painter().rect_stroke(rect, 16, egui::Stroke::new(1.0, LINE), egui::StrokeKind::Inside);
     rect
+}
+
+/// One line for the streams this PC can't watch: how many, and the one
+/// thing to ask when they share a reason.
+fn unwatchable_line(blocked: &[StreamEntry]) -> String {
+    let count = blocked.len();
+    let what = if count == 1 { "1 stream nearby can't be watched from this PC".to_owned() } else { format!("{count} streams nearby can't be watched from this PC") };
+    match blocked.first().and_then(|s| s.unavailable) {
+        Some(reason) if blocked.iter().all(|s| s.unavailable == Some(reason)) => format!("{what}. {reason}."),
+        _ => format!("{what}."),
+    }
+}
+
+/// What the self-view tile shows.
+enum SelfView {
+    /// The camera is on: its newest picture, or None until the first arrives.
+    Picture(Option<(egui::TextureId, [u32; 2])>),
+    /// The camera is off (or can't be used: the notice above says why).
+    Off,
+}
+
+/// Your own camera: a small tile bottom right inside the call picture's area.
+fn self_view_tile(ui: &mut egui::Ui, area: egui::Rect, view: SelfView) {
+    let aspect = match &view {
+        SelfView::Picture(Some((_, [w, h]))) => *w as f32 / (*h).max(1) as f32,
+        _ => 4.0 / 3.0,
+    };
+    let tile = call_layout::pip(area, aspect);
+    if tile.width() < 24.0 || tile.height() < 18.0 {
+        return;
+    }
+    let label = match &view {
+        SelfView::Picture(Some(_)) => "Your camera",
+        SelfView::Picture(None) => "Your camera, starting",
+        SelfView::Off => "Your camera is off",
+    };
+    ui.interact(tile, ui.id().with("self-view"), egui::Sense::hover())
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, label));
+    let painter = ui.painter().with_clip_rect(area);
+    let radius = 10;
+    painter.rect_filled(tile, radius, theme::RAISED);
+    match view {
+        SelfView::Picture(Some((id, size))) => {
+            egui::Image::new((id, egui::vec2(size[0] as f32, size[1] as f32))).corner_radius(radius).paint_at(ui, tile);
+        }
+        SelfView::Picture(None) | SelfView::Off => {
+            let off = matches!(view, SelfView::Off);
+            let (icon, text) = if off { (Icon::VideoOff, "Camera off") } else { (Icon::Camera, "Starting\u{2026}") };
+            let small = tile.height() < 64.0;
+            let icon_center = if small { tile.center() } else { tile.center() - egui::vec2(0.0, 9.0) };
+            draw_icon(&painter, egui::Rect::from_center_size(icon_center, egui::vec2(20.0, 20.0)), icon, SECONDARY);
+            if !small {
+                painter.text(tile.center() + egui::vec2(0.0, 15.0), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(12.0), SECONDARY);
+            }
+        }
+    }
+    painter.rect_stroke(tile, radius, egui::Stroke::new(1.0, Color32::from_gray(70)), egui::StrokeKind::Inside);
 }
 
 // ------------------------------------------------------------------ parts

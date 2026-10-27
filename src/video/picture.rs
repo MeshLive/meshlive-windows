@@ -98,6 +98,53 @@ pub fn nv12_to_rgba(nv12: &[u8], width: usize, height: usize, colour: Colour, ra
     out
 }
 
+/// The subsampling step that keeps a self-view thumbnail near `target_long`
+/// pixels on its long side (Android `rawSelfViewStep`).
+pub fn self_view_step(width: usize, height: usize, target_long: usize) -> usize {
+    width.max(height).div_ceil(target_long.max(1)).max(1)
+}
+
+/// Every `step`th pixel of an NV12 frame as RGBA, optionally mirrored left to
+/// right (the self-view, like a mirror): `(width / step) x (height / step)`.
+pub fn nv12_to_rgba_thumbnail(
+    nv12: &[u8],
+    width: usize,
+    height: usize,
+    step: usize,
+    mirror: bool,
+    colour: Colour,
+    range: Range,
+) -> (usize, usize, Vec<u8>) {
+    let step = step.max(1);
+    let (out_w, out_h) = (width / step, height / step);
+    if nv12.len() < width * height + width * height.div_ceil(2) {
+        return (0, 0, Vec::new());
+    }
+    let [rv, gu, gv, bu] = coefficients(colour);
+    let (y_scale, c_scale, y_off) = match range {
+        Range::Limited => (255.0 / 219.0, 255.0 / 224.0, 16.0),
+        Range::Full => (1.0, 1.0, 0.0),
+    };
+    let (luma, chroma) = nv12.split_at(width * height);
+    let mut out = vec![255u8; out_w * out_h * 4];
+    for row in 0..out_h {
+        let y = row * step;
+        let uv = &chroma[(y / 2) * width..];
+        for column in 0..out_w {
+            let x = column * step;
+            let l = (f32::from(luma[y * width + x]) - y_off) * y_scale;
+            let u = (f32::from(uv[x & !1]) - 128.0) * c_scale;
+            let v = (f32::from(uv[(x & !1) + 1]) - 128.0) * c_scale;
+            let shown = if mirror { out_w - 1 - column } else { column };
+            let at = (row * out_w + shown) * 4;
+            out[at] = (l + rv * v).round().clamp(0.0, 255.0) as u8;
+            out[at + 1] = (l - gu * u - gv * v).round().clamp(0.0, 255.0) as u8;
+            out[at + 2] = (l + bu * u).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    (out_w, out_h, out)
+}
+
 impl Nv12Frame<'_> {
     /// One readback of the cropped picture as RGBA (for a CPU-uploaded UI
     /// texture). `colour`/`range` default to BT.601 below 720 lines, BT.709
@@ -125,6 +172,43 @@ mod tests {
         let red = [81, 81, 81, 81, 90, 240];
         let rgba = nv12_to_rgba(&red, 2, 2, Colour::Bt601, Range::Limited);
         assert!(rgba[0] >= 250 && rgba[1] <= 5 && rgba[2] <= 5, "{:?}", &rgba[0..4]);
+    }
+
+    #[test]
+    fn colour_range_and_matrix_follow_the_stream_tags() {
+        // Limited-range mid grey (Y 126) is 128 in RGB; the same byte read as
+        // full range stays 126.
+        let grey = [126u8, 126, 126, 126, 128, 128];
+        assert_eq!(nv12_to_rgba(&grey, 2, 2, Colour::Bt601, Range::Limited)[0], 128);
+        assert_eq!(nv12_to_rgba(&grey, 2, 2, Colour::Bt601, Range::Full)[0], 126);
+        // Full-range black and white map to 0 and 255 exactly.
+        let bw = [0u8, 255, 0, 255, 128, 128];
+        let rgba = nv12_to_rgba(&bw, 2, 2, Colour::Bt709, Range::Full);
+        assert_eq!((rgba[0], rgba[4]), (0, 255));
+        // BT.709 and BT.601 differ for a saturated colour (green from V).
+        let red = [81u8, 81, 81, 81, 90, 240];
+        let six = nv12_to_rgba(&red, 2, 2, Colour::Bt601, Range::Limited);
+        let seven = nv12_to_rgba(&red, 2, 2, Colour::Bt709, Range::Limited);
+        assert_ne!(six[1], seven[1]);
+    }
+
+    #[test]
+    fn the_self_view_thumbnail_is_subsampled_and_mirrored() {
+        assert_eq!(self_view_step(1280, 720, 320), 4);
+        assert_eq!(self_view_step(352, 288, 320), 2);
+        assert_eq!(self_view_step(320, 240, 320), 1);
+        assert_eq!(self_view_step(0, 0, 0), 1);
+        // 4x2 NV12: left half black, right half white (limited range).
+        let nv12 = [16u8, 16, 235, 235, 16, 16, 235, 235, 128, 128, 128, 128];
+        let (w, h, plain) = nv12_to_rgba_thumbnail(&nv12, 4, 2, 1, false, Colour::Bt601, Range::Limited);
+        assert_eq!((w, h), (4, 2));
+        assert_eq!((plain[0], plain[12]), (0, 255), "left black, right white");
+        let (_, _, mirrored) = nv12_to_rgba_thumbnail(&nv12, 4, 2, 1, true, Colour::Bt601, Range::Limited);
+        assert_eq!((mirrored[0], mirrored[12]), (255, 0), "mirrored: left white, right black");
+        let (w, h, half) = nv12_to_rgba_thumbnail(&nv12, 4, 2, 2, false, Colour::Bt601, Range::Limited);
+        assert_eq!((w, h, half.len()), (2, 1, 8));
+        assert_eq!((half[0], half[4]), (0, 255));
+        assert_eq!(nv12_to_rgba_thumbnail(&nv12[..5], 4, 2, 1, false, Colour::Bt601, Range::Limited).0, 0, "short frame");
     }
 
     #[test]

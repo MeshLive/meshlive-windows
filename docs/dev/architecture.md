@@ -125,9 +125,10 @@ endpoint's echo cancellation where the driver offers it). Call video encodes on 
 device and a newest-only picture slot, and decodes on its own thread, so neither blocks the Bluetooth worker. Rate
 control ports Android's `LinkRateController`.
 
-## Streams (experimental)
+## Streams (beta)
 
-Watch and Go live are off by default (`MESHLIVE_WATCH=1`, `MESHLIVE_GO_LIVE=1`). The PC joins an Android stream by
+Watch and Go live are on by default (`MESHLIVE_WATCH=0`, `MESHLIVE_GO_LIVE=0` turn them off); on a PC without the
+needed adapter or Windows version the Live tab names what is missing. The PC joins an Android stream by
 advertising a viewer request; the phone dials it, then the usual BMH2 link, rotating-ID opening and endpoint
 handshake follow (`stream_watch.rs`, `watch.rs`). The PC checks the authenticated original source and pins it across
 route replacements, and plays video through the shared playout clock and audio-only radio after verifying every

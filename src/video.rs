@@ -19,7 +19,7 @@ pub use format::{FormatError, FormatTracker, PacketPlan, Rebuild, VideoFormat};
 mod frames;
 pub use frames::MfFrames;
 mod picture;
-pub use picture::{Picture, PictureSlot};
+pub use picture::{Picture, PictureSlot, nv12_to_rgba_thumbnail, self_view_step};
 mod encoder;
 pub use encoder::{
     Availability, Backend, EncodeError, EncodedUnit, Encoder, EncoderSettings, HardwareCandidate, MASK_AV1, MASK_VP9, DECODE_PREFERS_VP9,

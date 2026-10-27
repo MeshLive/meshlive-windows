@@ -57,6 +57,11 @@ same if you switch between them.
 - **Block someone:** **Block** on a contact or in Recent calls. **Block unknown callers** is in Settings.
 - **Start with Windows:** Settings > **Start with Windows** starts MeshLive hidden in the notification area when you
   sign in. It is off by default.
+- **Watch or go live (beta):** the **Live** tab lists live streams from phones nearby. Streams this PC cannot
+  watch are folded into one line that says what is needed. **Go live** streams this PC's camera or microphone to
+  phones; choose the quality with the slider first. If this PC cannot do either, the Live tab says why.
+- **Status:** the dot at the top right shows whether MeshLive is ready; select it to see your name and whether
+  phones can reach this PC.
 
 On an Android phone, turn on MeshLive > Settings > Connection > **Find iPhones**. Despite its name, this also lets
 the phone find Windows PCs.

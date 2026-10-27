@@ -13,7 +13,42 @@ use crate::{
 use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 use zeroize::Zeroizing;
 
-pub fn enabled() -> bool { std::env::var("MESHLIVE_WATCH").ok().as_deref() == Some("1") }
+/// Watch is on by default; `MESHLIVE_WATCH=0` turns it off (a test override).
+pub fn enabled() -> bool { switch_on(std::env::var("MESHLIVE_WATCH").ok().as_deref()) }
+/// A default-on feature switch: only an explicit "0" turns it off.
+pub fn switch_on(value: Option<&str>) -> bool { value != Some("0") }
+
+/// What every "live streams can't run here" text starts with.
+pub const LIVE_NEEDS: &str = "Live streams need Windows 11 version 24H2 or newer and a Bluetooth adapter that can advertise.";
+pub const LIVE_SWITCHED_OFF: &str = "Live streams are switched off on this PC (MESHLIVE_WATCH=0).";
+pub const BLUETOOTH_OFF: &str = "Bluetooth is off. Turn Bluetooth on to watch or go live.";
+
+/// Why Watch and Go live can't run on this PC (None: they can). `policy` is
+/// the announcement policy verdict (`callee::policy`): the same Windows
+/// version and adapter checks receiving calls has. Pure, for the Live page.
+pub fn unsupported_reason(
+    enabled: bool,
+    caps: &crate::bluetooth::Capabilities,
+    policy: Result<&'static str, &'static str>,
+) -> Option<String> {
+    use crate::bluetooth::Radio;
+    if !enabled {
+        return Some(LIVE_SWITCHED_OFF.into());
+    }
+    if caps.radio != Radio::On {
+        return Some(format!("{}. Turn Bluetooth on to watch or go live.", caps.status()));
+    }
+    if policy == Err(crate::qw_policy::OLD_WINDOWS) {
+        return Some(format!("{LIVE_NEEDS} This PC has an older version of Windows. Calling a phone still works."));
+    }
+    let adapter = caps.require(true).is_ok() && caps.central == Some(true) && caps.extended_advertising == Some(true);
+    if !adapter {
+        return Some(format!(
+            "{LIVE_NEEDS} This PC's Bluetooth adapter can't advertise the way live streams need. Calling a phone still works."
+        ));
+    }
+    policy.err().map(|reason| format!("{LIVE_NEEDS} {reason}"))
+}
 pub fn idle_scan_enabled() -> bool { std::env::var("MESHLIVE_STREAM_IDLE_SCAN").ok().as_deref() == Some("1") }
 pub fn route_retry_enabled() -> bool { std::env::var("MESHLIVE_WATCH_ROUTE_RETRY").as_deref() == Ok("1") }
 
@@ -50,8 +85,13 @@ impl Target {
     pub fn matches(self, a: &Announcement) -> bool { a.flags & STREAM != 0 && self == Self::from(a) }
 }
 
+/// Why this PC can't watch an offer (None: it can), in the words the Live
+/// row shows. A version 2 offer is a privacy policy, not a limit (Design QV
+/// R7): joining it means advertising this PC's fixed ID to everyone nearby,
+/// so the phone has to use Android's "Private Bluetooth ID" (rotating IDs).
+pub const NEEDS_PRIVATE_ID: &str = "Ask them to turn on Private Bluetooth ID";
 pub fn unavailable(a: &Announcement, decode_mask: u8) -> Option<&'static str> {
-    if a.version != 5 { Some("Needs rotating discovery IDs on that phone") }
+    if a.version != 5 { Some(NEEDS_PRIVATE_ID) }
     else if !a.is_gatt() { Some("Not reachable from this PC") }
     else if a.summary != 0x40 && a.summary & decode_mask & 7 == 0 { Some("This PC can't decode this stream") }
     else { None }

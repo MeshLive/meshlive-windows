@@ -36,7 +36,12 @@ try {
         $env:MESH_VPX_LIB = Join-Path $repo ".artifacts/native/$Target/vpx"
         $arguments = @('build','--locked','--target',$Target,'--jobs','1')
         if ($Action -eq 'Check') { $arguments[0] = 'check' }
-        if ($Configuration -eq 'Release') { $arguments += '--release' }
+        if ($Configuration -eq 'Release') {
+            $arguments += '--release'
+            # No build-machine path in a release exe: remap the checkout and the crate cache, name the PDB without its folder.
+            $env:CARGO_ENCODED_RUSTFLAGS = @('-C', 'target-feature=+crt-static', "--remap-path-prefix=$($repo.TrimEnd('\'))\=",
+                "--remap-path-prefix=$($env:CARGO_HOME)=cargo", '-C', 'link-arg=/PDBALTPATH:%_PDB%') -join [char]0x1f
+        }
         $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
         & cargo @arguments 2>&1 | ForEach-Object { "$_" }; $code = $LASTEXITCODE
         $ErrorActionPreference = $saved

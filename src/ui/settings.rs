@@ -240,7 +240,7 @@ impl Ui {
                 concat!(
                     "MeshLive ",
                     env!("CARGO_PKG_VERSION"),
-                    "\nNative Rust \u{b7} Direct3D 11\nGPL-3.0-or-later\n\nThis Windows build is a preview."
+                    "\nFree software: GPL-3.0-or-later.\n\nThis Windows build is a preview."
                 )
                 .into(),
             ));

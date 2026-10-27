@@ -683,6 +683,66 @@ pub fn paint_switch(painter: &egui::Painter, rect: Rect, on: bool, enabled: bool
 }
 
 pub const SWITCH_SIZE: Vec2 = vec2(40.0, 22.0);
+
+/// A labelled slider as Android lays it out: the name on the left and the
+/// value on the right of one line, the slider under them across the whole
+/// width. Nothing in the row depends on the value's text, so the slider
+/// never changes length or moves while it is dragged.
+pub fn value_slider(ui: &mut Ui, label: &str, value: &mut u32, range: std::ops::RangeInclusive<u32>, step: u32, unit: &str) -> Response {
+    let width = ui.available_width();
+    let font = Type::Body.font();
+    let shown = format!("{value} {unit}");
+    let (line, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+    ui.painter().text(egui::pos2(line.left(), line.center().y), egui::Align2::LEFT_CENTER, label, font.clone(), theme::TEXT);
+    let value_rect = ui.painter().text(egui::pos2(line.right(), line.center().y), egui::Align2::RIGHT_CENTER, &shown, font, theme::TEXT_SECONDARY);
+    // The value as its own accessible label (the slider also reports it).
+    ui.interact(value_rect, ui.id().with((label, "value")), Sense::hover())
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &shown));
+    ui.add_space(4.0);
+    let slider = ui
+        .scope(|ui| {
+            ui.spacing_mut().slider_width = (width - 4.0).max(40.0);
+            // egui ends the filled part at the handle plus the rail's corner
+            // radius; the theme's pill radius made it run far past the handle
+            // (it grew as the value grew). A rail-sized radius keeps it at the handle.
+            let rail = egui::CornerRadius::same((ui.spacing().slider_rail_height / 2.0).round().clamp(0.0, 255.0) as u8);
+            ui.visuals_mut().widgets.inactive.corner_radius = rail;
+            ui.add(
+                egui::Slider::new(value, range)
+                    .step_by(f64::from(step))
+                    .show_value(false)
+                    .text(""),
+            )
+        })
+        .inner;
+    slider.widget_info(|| WidgetInfo::slider(true, f64::from(*value), label));
+    slider
+}
+
+/// A short label and a switch on one line (no row of its own), e.g. the
+/// Calls page's "Reachable". The whole thing toggles; `hint` is its tooltip.
+/// `label` may be empty (the switch alone); `a11y` is its accessible name.
+pub fn compact_switch(ui: &mut Ui, label: &str, a11y: &str, hint: &str, value: &mut bool, enabled: bool) -> Response {
+    let font = egui::FontId::new(14.0, theme::semibold_family());
+    let ink = if enabled { theme::TEXT } else { theme::TEXT_DISABLED };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, ink);
+    let gap = if label.is_empty() { 0.0 } else { 10.0 };
+    let size = vec2(galley.size().x + gap + SWITCH_SIZE.x, SWITCH_SIZE.y.max(galley.size().y) + 8.0);
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, mut response) = ui.allocate_exact_size(size, sense);
+    if enabled && response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+    let on = *value;
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, a11y));
+    let text_pos = egui::pos2(rect.left(), rect.center().y - galley.size().y * 0.5);
+    ui.painter().galley(text_pos, galley, ink);
+    let switch = Rect::from_min_size(egui::pos2(rect.right() - SWITCH_SIZE.x, rect.center().y - SWITCH_SIZE.y * 0.5), SWITCH_SIZE);
+    paint_switch(ui.painter(), switch, on, enabled, response.hovered());
+    focus_ring(ui, &response, switch, SWITCH_SIZE.y * 0.5);
+    response.on_hover_text(hint)
+}
 /// The (i) button after a label: its size and the gap before it.
 const INFO_SIZE: f32 = 28.0;
 const INFO_GAP: f32 = 4.0;
@@ -875,8 +935,10 @@ pub fn line_with_info(ui: &mut Ui, id: &str, text: &str, a11y: &str, info: &str)
 /// The meaning of a status chip's dot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
-    /// Everything is fine: a grey dot ("Ready").
+    /// Everything is fine: Android's green dot ("Ready").
     Ok,
+    /// Works, but not as you may expect: a white dot and a word ("Hidden").
+    Attention,
     /// One problem to fix: a white warning glyph ("Bluetooth off").
     Problem,
     /// On air: a red dot.
@@ -900,7 +962,10 @@ pub fn status_chip(ui: &mut Ui, text: &str, tone: Tone) -> Response {
     let mark = egui::pos2(rect.left() + 12.0 + 6.0, rect.center().y);
     match tone {
         Tone::Ok => {
-            ui.painter().circle_filled(mark, 4.5, theme::TEXT_SECONDARY);
+            ui.painter().circle_filled(mark, 4.5, theme::POSITIVE);
+        }
+        Tone::Attention => {
+            ui.painter().circle_filled(mark, 4.5, theme::TEXT);
         }
         Tone::Live => {
             ui.painter().circle_filled(mark, 5.0, theme::LIVE);

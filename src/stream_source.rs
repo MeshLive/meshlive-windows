@@ -8,7 +8,8 @@ use crate::{
 };
 use std::{sync::atomic::AtomicBool, time::{Duration, Instant}};
 
-pub fn enabled() -> bool { std::env::var("MESHLIVE_GO_LIVE").ok().as_deref() == Some("1") }
+/// Go live is on by default; `MESHLIVE_GO_LIVE=0` turns it off (a test override).
+pub fn enabled() -> bool { crate::stream_watch::switch_on(std::env::var("MESHLIVE_GO_LIVE").ok().as_deref()) }
 pub fn media_state_enabled() -> bool { std::env::var("MESHLIVE_LIVE_MEDIA_STATE").ok().as_deref() == Some("1") }
 pub fn camera_fence_enabled() -> bool { std::env::var("MESHLIVE_SOURCE_CAMERA_FENCE").as_deref() != Ok("0") }
 pub const EXPOSURE: &str = "While you're live, nearby Bluetooth scanners can recognise this computer from day to day.";

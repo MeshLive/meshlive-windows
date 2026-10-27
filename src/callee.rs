@@ -528,6 +528,9 @@ pub struct Answer {
     pub peer_fingerprint: [u8; 32],
     /// The caller's verified name, when its labels came before the Invite.
     pub peer_name: Option<String>,
+    /// The caller's throwaway node ID when it called as a stranger (its
+    /// generated name, Android `strangerGeneratedName`); None for a real key.
+    pub peer_throwaway: Option<[u8; 16]>,
     /// The owner's screen declined this caller (CF-CALL-24): nothing of
     /// this PC's was queued; decline it silently.
     pub blocked: bool,
@@ -770,6 +773,7 @@ pub fn answer_with_identity(
         invite,
         verified: !answered.peer_pseudonymous,
         peer_fingerprint: answered.peer_fingerprint,
+        peer_throwaway: answered.peer_pseudonymous.then_some(answered.peer_node),
         blocked,
         busy,
         peer_name: pending_labels.into_iter().find_map(|n| match n {

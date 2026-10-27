@@ -51,7 +51,8 @@ other as contacts, and try Mute, Camera off and End. Then report what you saw wi
 `MESHLIVE_TRACE=1` before starting the app if you want a local trace for a bug report (it stays on your PC; remove
 names and IDs before sharing any of it).
 
-Watch and Go live need `MESHLIVE_WATCH=1` (and `MESHLIVE_GO_LIVE=1`) on the PC and, on the phone, Settings > Connection
+Watch and Go live are on by default on the PC (`MESHLIVE_WATCH=0` / `MESHLIVE_GO_LIVE=0` turn them off). The phone
+needs Settings > Connection
 > **Find PCs** and **PC live streams**, which are off by default. The phone must support extended Bluetooth scanning.
 
 ### Opt-in native checks
@@ -115,7 +116,7 @@ the evidence recorded. Each gate holds for every eligible PC and phone.
 - A call across a rotating-ID change and a call with the PC idle.
 - The packaged (MSIX) app, separately from the unpackaged build.
 
-### Watch (experimental)
+### Watch (beta)
 
 - Each eligible Android source, video and audio-only radio separately, five minutes each: authenticated matching
   source, first decoded media within three seconds, no signature or sequence failures, no unintended parent loss,
@@ -123,7 +124,7 @@ the evidence recorded. Each gate holds for every eligible PC and phone.
 - Through an Android relay phone: the original source is kept, and after a deliberate parent loss the same source
   returns with fresh media while a substituted source is rejected.
 
-### Go live (experimental)
+### Go live (beta)
 
 - One viewer at a time, five minutes of video and of radio, repeated Start and End: stable paced delivery without
   rate decay or listener loss, Pause and Resume, and the authenticated end acknowledgement within the five-second

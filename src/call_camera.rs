@@ -99,15 +99,33 @@ pub fn reason_text(native: Option<i32>, privacy: &[String]) -> String {
     }
 }
 
+/// The self-view thumbnail: long side near this many pixels (Android
+/// `rawSelfViewStep`'s 320) and at most this often (15 per second).
+pub const SELF_VIEW_LONG_SIDE: usize = 320;
+pub const SELF_VIEW_INTERVAL: Duration = Duration::from_millis(66);
+
+/// The camera's NV12 picture as the call screen's self-view: subsampled and
+/// mirrored (the way a mirror and the Android preview show you). Camera NV12
+/// is BT.601 limited range, the same assumption the encoder's input makes.
+pub fn self_view(nv12: &[u8], width: usize, height: usize) -> (usize, usize, Vec<u8>) {
+    let step = crate::video::self_view_step(width, height, SELF_VIEW_LONG_SIDE);
+    crate::video::nv12_to_rgba_thumbnail(nv12, width, height, step, true, crate::video::Colour::Bt601, crate::video::Range::Limited)
+}
+
 impl CallCamera {
     pub fn start(width: u32, height: u32) -> Self {
+        Self::start_with_preview(width, height, None)
+    }
+    /// `start` that also publishes a small mirrored copy of each picture
+    /// (at most every `SELF_VIEW_INTERVAL`) for the call screen's self-view.
+    pub fn start_with_preview(width: u32, height: u32, preview: Option<Arc<crate::video::PictureSlot>>) -> Self {
         let (frame_tx, frames) = mpsc::sync_channel::<Vec<u8>>(2);
         let (event_tx, events) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let thread = std::thread::Builder::new()
             .name("meshlive-call-camera".into())
-            .spawn(move || run(width, height, frame_tx, event_tx, flag))
+            .spawn(move || run(width, height, frame_tx, event_tx, flag, preview))
             .ok();
         Self { frames, events, stop, thread }
     }
@@ -130,7 +148,14 @@ impl Drop for CallCamera {
     }
 }
 
-fn run(width: u32, height: u32, frames: SyncSender<Vec<u8>>, events: mpsc::Sender<Event>, stop: Arc<AtomicBool>) {
+fn run(
+    width: u32,
+    height: u32,
+    frames: SyncSender<Vec<u8>>,
+    events: mpsc::Sender<Event>,
+    stop: Arc<AtomicBool>,
+    preview: Option<Arc<crate::video::PictureSlot>>,
+) {
     let mut camera = match Camera::open_first(width, height) {
         Ok(camera) => camera,
         Err(error) => {
@@ -144,15 +169,25 @@ fn run(width: u32, height: u32, frames: SyncSender<Vec<u8>>, events: mpsc::Sende
     };
     let _ = events.send(Event::On);
     let mut blanks = LeadingBlankFrames::new(drop_leading_blank_frames());
+    let mut shown_at: Option<Instant> = None;
     while !stop.load(Ordering::Acquire) {
         match camera.next_frame(Instant::now() + Duration::from_millis(200)) {
             Ok(picture)
                 if blanks.checking()
                     && blanks.drop(plane_means(&picture, width as usize, height as usize), Instant::now()) => {}
-            Ok(picture) => match frames.try_send(picture) {
-                Ok(()) | Err(TrySendError::Full(_)) => {}
-                Err(TrySendError::Disconnected(_)) => return,
-            },
+            Ok(picture) => {
+                if let Some(slot) = preview.as_ref().filter(|_| shown_at.is_none_or(|at| at.elapsed() >= SELF_VIEW_INTERVAL)) {
+                    shown_at = Some(Instant::now());
+                    let (w, h, rgba) = self_view(&picture, width as usize, height as usize);
+                    if w > 0 && h > 0 {
+                        slot.publish(w as u32, h as u32, rgba, 0);
+                    }
+                }
+                match frames.try_send(picture) {
+                    Ok(()) | Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => return,
+                }
+            }
             Err(crate::capture::Error::Timeout) => {}
             Err(_) => {
                 let _ = events.send(Event::Unavailable(reason_text(Some(0), &camera_privacy_facts())));

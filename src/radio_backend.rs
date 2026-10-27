@@ -2087,6 +2087,14 @@ impl Worker {
                 lost = true;
             }
         }
+        // A pseudonym<->pseudonym caller that did not reveal in time: the
+        // session wrote Hang-up/Error and dropped the call's media.
+        if call.dialed.session.unconfirmed() && call.closing.is_none() {
+            trace("caller_reveal_timeout", "hang_up=error");
+            call.closing = Some(Instant::now());
+            updates.push(Update::CallEnded { reason: crate::ui::backend::CallEndReason::Unconfirmed });
+            updates.push(Update::CallLinkLost);
+        }
         call.dialed.link.drain_events(&mut |p, d| trace(p, d));
         call.dialed.link.recheck_preset(&mut |p, d| trace(p, d));
         // As peripheral the phone sets the link: trace what Windows reports

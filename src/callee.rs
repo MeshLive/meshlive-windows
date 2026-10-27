@@ -742,7 +742,9 @@ pub fn answer_with_identity(
         let real = SigningIdentity::public_key(&identity).map_err(|e| format!("{e:?}"))?;
         let reveal = reveal::RevealSession::new(reveal::ROLE_CALLEE, &answered.exporter, own, answered.peer, true, answered.peer_pseudonymous, vec![own, real])
             .map_err(|e| format!("reveal {e:?}"))?;
-        session.reveal_on_accept(CalleeReveal { session: reveal, real: Box::new(identity), entries });
+        // Caller-reveal deadline: a direct link is 0 hops whatever the Invite says.
+        let relay_hops = if answered.relayed { invite.relay_hops } else { 0 };
+        session.reveal_on_accept(CalleeReveal { session: reveal, real: Box::new(identity), entries, relay_hops });
     } else {
         // RV15: a real-key callee opens the selected ID first.
         let body = rotating::encode_body(&entries).map_err(|e| format!("{e:?}"))?;

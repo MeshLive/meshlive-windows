@@ -71,7 +71,7 @@ fn callee(
 }
 
 /// An Android stranger caller: throwaway at both layers, no tag.
-fn stranger_caller(mut pipe: Pipe) -> std::thread::JoinHandle<Result<bool, String>> {
+fn stranger_caller(mut pipe: Pipe) -> std::thread::JoinHandle<Result<(bool, u8), String>> {
     std::thread::spawn(move || {
         let (_, me, _) = identities();
         let throwaway = Identity::ephemeral().unwrap();
@@ -96,6 +96,7 @@ fn stranger_caller(mut pipe: Pipe) -> std::thread::JoinHandle<Result<bool, Strin
         let InitiatorProgress::Complete(link) = progress else { return Err("I_FIRST".into()) };
         pipe.send(&frame_handshake(&m3).unwrap(), deadline)?;
         let peer_pseudonym = link.peer().extensions().pseudonym;
+        let peer_link_transport = link.peer().capabilities().transport;
         let mut hop_out = Sealer::new(Layer::Hop, link.keys().send_key(), Policy::default()).unwrap();
         let mut hop_in = HopReader::new(link.keys().receive_key(), Policy::default()).unwrap();
         let config = Config::new(Purpose::Endpoint, &me, CAPABILITIES).unwrap().with_stranger(&throwaway, CAPABILITIES).unwrap();
@@ -114,7 +115,7 @@ fn stranger_caller(mut pipe: Pipe) -> std::thread::JoinHandle<Result<bool, Strin
         let (progress, m3) = waiting.receive(&m2.plaintext, |_| Ok(())).map_err(|e| format!("{e:?}"))?;
         let InitiatorProgress::Complete(_) = progress else { return Err("I_FIRST".into()) };
         pipe.send(&hop_out.seal(4, 0, &m3).unwrap(), deadline)?;
-        Ok(peer_pseudonym)
+        Ok((peer_pseudonym, peer_link_transport))
     })
 }
 
@@ -126,7 +127,11 @@ fn a_stranger_meets_this_pcs_throwaway_never_its_real_key() {
     assert!(answered.own_pseudonymous, "rule P: an untagged stranger gets the throwaway");
     assert!(answered.peer_pseudonymous);
     assert_eq!(answered.tag, None);
-    assert!(thread.join().unwrap().unwrap(), "the caller saw a pseudonym");
+    let (saw_pseudonym, link_transport) = thread.join().unwrap().unwrap();
+    assert!(saw_pseudonym, "the caller saw a pseudonym");
+    // The throwaway's link block clears bit 3: no BDO1 is promised, so the
+    // caller's first hop record is its end-to-end msg1 (the handshake completed).
+    assert_eq!(link_transport & rotating::LINK_OPENING_BIT, 0);
 }
 
 #[test]

@@ -15,6 +15,27 @@ pub const ROLE_CALL_OFFER: u8 = 0;
 pub const ROLE_STREAM_OFFER: u8 = 1;
 pub const ROLE_VIEWER_REQUEST: u8 = 2;
 
+/// Link-hello transport-mask bit 3: "sends and accepts `BDO1` (hop type 13)
+/// as the first hop record" (PROTOCOL "Link opening").
+pub const LINK_OPENING_BIT: u8 = 0x08;
+
+/// Whether this side of a link runs the `BDO1` exchange: both link hellos
+/// carry bit 3 and this side does not skip it. Android
+/// `RelayIdentityPolicy.skipsLinkOpening`: an initiator skips when its
+/// responder presented a pseudonym (that responder cleared bit 3 and
+/// withholds its salt); a responder skips only when it presented one itself.
+/// A real responder answering a pseudonymous initiator still exchanges.
+pub fn link_opening_exchanged(
+    initiator: bool,
+    own_transport: u8,
+    peer_transport: u8,
+    own_pseudonymous: bool,
+    peer_pseudonymous: bool,
+) -> bool {
+    let skips = if initiator { peer_pseudonymous } else { own_pseudonymous };
+    own_transport & LINK_OPENING_BIT != 0 && peer_transport & LINK_OPENING_BIT != 0 && !skips
+}
+
 const SALT_DOMAIN: &[u8] = b"BluetoothVideoMesh/Discovery/Salt/1\0";
 const ID_DOMAIN: &[u8] = b"BluetoothVideoMesh/Discovery/Id/1\0";
 const CONTACT_TAG_INFO: &[u8] = b"BluetoothVideoMesh/BMH3/ContactTag/1";
@@ -475,6 +496,21 @@ mod tests {
     const EPOCH: u32 = 1_990_656;
     fn key() -> [u8; 32] {
         std::array::from_fn(|i| i as u8)
+    }
+    #[test]
+    fn the_link_opening_follows_androids_skip_rule_for_both_roles() {
+        // Both hellos carry bit 3, nobody pseudonymous: both sides exchange.
+        assert!(link_opening_exchanged(true, 0x0c, 0x0c, false, false));
+        assert!(link_opening_exchanged(false, 0x0c, 0x0c, false, false));
+        // A pseudonymous initiator meeting a real responder still exchanges, and so does that responder.
+        assert!(link_opening_exchanged(true, 0x0c, 0x0c, true, false));
+        assert!(link_opening_exchanged(false, 0x0c, 0x0c, false, true));
+        // A pseudonymous responder skips; its initiator skips too.
+        assert!(!link_opening_exchanged(false, 0x0c, 0x0c, true, false));
+        assert!(!link_opening_exchanged(true, 0x0c, 0x0c, false, true));
+        // Either hello without bit 3: no exchange.
+        assert!(!link_opening_exchanged(true, 0x04, 0x0c, false, false));
+        assert!(!link_opening_exchanged(false, 0x0c, 0x04, false, false));
     }
     #[test]
     fn android_salt_rdi_and_opening_vectors_match_byte_for_byte() {

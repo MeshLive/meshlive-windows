@@ -67,8 +67,10 @@ from the PC to one phone, and outgoing calls through Android relay phones. See [
 
 ## Status
 
-MeshLive for Windows is **beta-quality and not yet released**. There is no Microsoft Store listing or signed download
-yet; build it from source. It has not had an independent security audit: do not rely on it where your safety depends
+MeshLive for Windows is **beta-quality**. Testers can download an unsigned zip from the
+[releases page](https://github.com/MeshLive/meshlive-windows/releases/latest) (check it against `SHA256SUMS`; see the
+[user guide](docs/user-guide.md#release-zip-testers)) or build it from source. There is no Microsoft Store listing or
+code-signed download yet. It has not had an independent security audit: do not rely on it where your safety depends
 on it.
 
 What has been tried on real hardware (one Windows 11 x64 laptop with an Intel Bluetooth adapter, against Android

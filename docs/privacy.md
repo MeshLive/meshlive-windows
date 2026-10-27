@@ -35,7 +35,9 @@ These are stored only on your PC, under your Windows user's app data (`%LOCALAPP
 - **Your name:** if you set one, it is sent only to verified contacts during a call. It is signed, so it cannot be
   changed on the way.
 - **Your key:** a verified contact learns your identity key when you add each other. A stranger you call meets a
-  temporary key, and learns your real one only if the call is answered.
+  temporary key, and learns your real one only if the call is answered. When a stranger calls this PC, answering
+  shows them your real key, and they must show theirs within 10 seconds (up to 40 seconds through relay phones).
+  Until they do, the PC sends none of your sound or picture and drops theirs; a caller that does not is hung up.
 
 ## Microphone and camera
 

@@ -12,7 +12,7 @@ use crate::{
     bmh2::{Capabilities, SigningIdentity},
     bmh3::{
         self, Purpose,
-        handshake::{Config, InitiatorOptions, InitiatorProgress, Peer, Waiting2},
+        handshake::{Config, InitiatorOptions, InitiatorProgress, Peer, Session, Waiting2},
         reveal::{ROLE_CALLER, RevealSession},
     },
     call::CallLink,
@@ -24,6 +24,7 @@ use crate::{
     opus,
     records::{Layer, Policy, Sealer},
     rotating::{self, Selection},
+    verify_scan::Carrier,
 };
 use std::{
     sync::{
@@ -463,6 +464,128 @@ pub fn dial_relay(
     dial_selected_route(route, offer.prefix, true, Some(real), who, offer.cost, call_id, voice, cancelled, trace)
 }
 
+/// The caller's link toward a call offer: the BMH3 link handshake as a
+/// stranger (`pseudonym` presented, `real` kept for the REVEAL), then the
+/// link opening `BDO1` (PROTOCOL "Link opening") when both *signed* link
+/// hellos carry bit 3 and the callee did not present a pseudonym
+/// (`rotating::link_opening_exchanged`, Android `skipsLinkOpening`). A
+/// throwaway's link block never signs bit 3, so a stranger dial runs no
+/// opening. When one runs, this PC (it advertised nothing) sends count 0,
+/// then reads the callee's. With
+/// `rv15 = Some((selected RDI, wall epoch))` an entry must open the selected
+/// ID for the authenticated link node ID (RV15); otherwise the entries are
+/// only decoded (a v2 selection is checked by prefix, whatever the hello says).
+pub(crate) struct CallerLink {
+    pub link: Session,
+    pub hop_out: Sealer,
+    pub hop_in: HopReader,
+    pub buffer: Vec<u8>,
+    /// The `BDO1` exchange ran (traced as `link_done bdo1=`; read by tests).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub opened: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn caller_link<C: Carrier>(
+    carrier: &mut C,
+    real: &dyn SigningIdentity,
+    pseudonym: &dyn SigningIdentity,
+    link_caps: Capabilities,
+    accept: impl FnOnce(&Peer) -> Result<(), bmh3::Error>,
+    rv15: Option<([u8; 6], u32)>,
+    started: Instant,
+    cancelled: &AtomicBool,
+    trace: &mut dyn FnMut(&str, &str),
+) -> Result<CallerLink, Error> {
+    let deadline = started + Duration::from_secs(HOP_HANDSHAKE_SECONDS);
+    let config = stranger_config(Purpose::Link, real, pseudonym, link_caps).map_err(at(Stage::Link))?;
+    let (waiting, m1) = Waiting2::start(config, InitiatorOptions::default()).map_err(at(Stage::Link))?;
+    carrier.send(&frame_handshake(&m1).map_err(at(Stage::Link))?, deadline).map_err(|e| fail(Stage::Link, &e))?;
+    trace("link_msg1", "bytes=122");
+    let mut buffer = Vec::new();
+    let mut frames = HandshakeReader::default();
+    let m2 = loop {
+        let mut input = buffer.as_slice();
+        let got = frames.read(&mut input).map_err(at(Stage::Link))?;
+        let used = buffer.len() - input.len();
+        buffer.drain(..used);
+        if let Some(m) = got {
+            break m;
+        }
+        wait_carrier(carrier, &mut buffer, Stage::Link, deadline, cancelled, "no msg2")?;
+    };
+    trace("link_msg2", &format!("bytes={}", m2.len()));
+    let (progress, m3) = waiting.receive(&m2, accept).map_err(at(Stage::Link))?;
+    let InitiatorProgress::Complete(link) = progress else {
+        return Err(fail(Stage::Link, "responder demanded I_FIRST"));
+    };
+    carrier.send(&frame_handshake(&m3).map_err(at(Stage::Link))?, deadline).map_err(|e| fail(Stage::Link, &e))?;
+    let peer_transport = link.peer().capabilities().transport;
+    let peer_pseudonymous = link.peer().extensions().pseudonym;
+    // What this PC's block really signed: the BMH3 layer clears bit 3 from a
+    // pseudonymous LINK block (`handshake::make_block`), so a throwaway link
+    // hello never claims BDO1 and no opening runs; this stays compatible with
+    // released Android responders that skip BDO1 whenever their peer is a
+    // throwaway. The callee's real-key opening is then checked through the
+    // BMH3 OPENING extension (`selected_peer`), a pseudonymous callee's by REVEAL.
+    let own_transport =
+        if link.own_pseudonym() { link_caps.transport & !rotating::LINK_OPENING_BIT } else { link_caps.transport };
+    let opened = rotating::link_opening_exchanged(true, own_transport, peer_transport, link.own_pseudonym(), peer_pseudonymous);
+    trace(
+        "link_done",
+        &format!(
+            "peer_pseudonymous={peer_pseudonymous} peer_bit3={} bdo1={opened}",
+            peer_transport & rotating::LINK_OPENING_BIT != 0
+        ),
+    );
+    let policy = Policy { require_opening: opened, ..Policy::default() };
+    let mut hop_out = Sealer::new(Layer::Hop, link.keys().send_key(), policy).map_err(at(Stage::Link))?;
+    let mut hop_in = HopReader::new(link.keys().receive_key(), policy).map_err(at(Stage::Link))?;
+    if opened {
+        // CF-CALL-08: the opening counts toward the callee's whole setup bound.
+        let deadline = started + Duration::from_secs(CALL_HANDSHAKE_SECONDS);
+        let own = rotating::encode_bdo1(&[]).map_err(at(Stage::Link))?;
+        carrier.send(&hop_out.seal(13, 0, &own).map_err(at(Stage::Link))?, deadline).map_err(|e| fail(Stage::Link, &e))?;
+        let record = loop {
+            let mut input = buffer.as_slice();
+            let record = hop_in.read(&mut input, 4096).map_err(at(Stage::Link))?;
+            let used = buffer.len() - input.len();
+            buffer.drain(..used);
+            if let Some(r) = record {
+                break r;
+            }
+            wait_carrier(carrier, &mut buffer, Stage::Link, deadline, cancelled, "no link opening")?;
+        };
+        if record.header.kind != 13 {
+            return Err(fail(Stage::Link, "expected the discovery opening"));
+        }
+        let entries = rotating::decode_bdo1(&record.plaintext).map_err(at(Stage::Link))?;
+        if let Some((selected, wall)) = rv15 {
+            match rotating::check_selection(&selected, true, rotating::ROLE_CALL_OFFER, link.peer().node_id(), Some(&entries), wall) {
+                Ok(Selection::Pass) => {}
+                // As a prefix mismatch fails (RV15).
+                _ => return Err(fail(Stage::Link, "Peer identity changed between discovery and connection")),
+            }
+        }
+        trace("link_bdo1", &format!("entries={}", entries.len()));
+    }
+    Ok(CallerLink { link, hop_out, hop_in, buffer, opened })
+}
+
+/// Bytes from `carrier` into `buffer` (at most 50 ms), failing at
+/// `deadline` with `timeout` or on cancellation.
+fn wait_carrier<C: Carrier>(
+    carrier: &mut C, buffer: &mut Vec<u8>, stage: Stage, deadline: Instant, cancelled: &AtomicBool, timeout: &str,
+) -> Result<(), Error> {
+    if Instant::now() >= deadline {
+        return Err(fail(stage, timeout));
+    }
+    if cancelled.load(Ordering::Acquire) {
+        return Err(fail(stage, "cancelled"));
+    }
+    carrier.receive(buffer, Duration::from_millis(50)).map(|_| ()).map_err(|e| fail(stage, &e))
+}
+
 fn dial_selected_route(
     route: &Route, rdi: [u8; 6], version5: bool, real: Option<Identity>, who: Option<&ContactDial>, relay_hops: u8,
     call_id: [u8; 16], voice: bool, cancelled: Arc<AtomicBool>, trace: &mut dyn FnMut(&str, &str),
@@ -481,6 +604,9 @@ fn dial_selected_route(
         None => Identity::ephemeral().map_err(at(Stage::Link))?,
     };
     let pseudonym = Identity::ephemeral().map_err(at(Stage::Link))?;
+    // Bit 3 stays in these capabilities for the end-to-end hello (BDX1:
+    // OPENING and REVEAL). The throwaway's link block has it cleared by the
+    // BMH3 layer, so the link hello promises no BDO1 (`caller_link`).
     let link_caps = Capabilities {
         transport: 0x0c,
         encode_codecs: 0x03,
@@ -489,59 +615,26 @@ fn dial_selected_route(
         maximum_children: 0,
     };
     let check = |peer: &Peer| selected_peer(peer, &rdi, version5, wall, who);
-    let config = stranger_config(Purpose::Link, &real, &pseudonym, link_caps).map_err(at(Stage::Link))?;
-    let (waiting, m1) = Waiting2::start(config, InitiatorOptions::default()).map_err(at(Stage::Link))?;
     let handshake_started = Instant::now();
-    let deadline = handshake_started + Duration::from_secs(HOP_HANDSHAKE_SECONDS);
-    central
-        .write(&frame_handshake(&m1).map_err(at(Stage::Link))?, deadline)
-        .map_err(at(Stage::Link))?;
-    trace("link_msg1", "bytes=122");
-    let mut buffer = Vec::new();
-    let mut frames = HandshakeReader::default();
-    let m2 = loop {
-        let mut input = buffer.as_slice();
-        let got = frames.read(&mut input).map_err(at(Stage::Link))?;
-        let used = buffer.len() - input.len();
-        buffer.drain(..used);
-        if let Some(m) = got {
-            break m;
-        }
-        if Instant::now() >= deadline {
-            return Err(fail(Stage::Link, "no msg2"));
-        }
-        if cancelled.load(Ordering::Acquire) {
-            return Err(fail(Stage::Link, "cancelled"));
-        }
-        pull(&central, &mut buffer, Duration::from_millis(50)).map_err(|e| Error { stage: Stage::Link, ..e })?;
-    };
-    trace("link_msg2", &format!("bytes={}", m2.len()));
-    let (progress, m3) = waiting.receive(&m2, |peer: &Peer| {
-        if relay_hops == 0 { check(peer) } else { relay_peer(peer) }
-    }).map_err(at(Stage::Link))?;
-    let InitiatorProgress::Complete(link) = progress else {
-        return Err(fail(Stage::Link, "responder demanded I_FIRST"));
-    };
-    central
-        .write(&frame_handshake(&m3).map_err(at(Stage::Link))?, deadline)
-        .map_err(at(Stage::Link))?;
+    // RV15 on the link opening: a direct call to a selected v5 offer. A
+    // relay's parent-facing hello has no bit 3, so no opening runs there.
+    let rv15 = (version5 && relay_hops == 0).then_some((rdi, wall));
+    let CallerLink { link, mut hop_out, mut hop_in, mut buffer, .. } = caller_link(
+        &mut central,
+        &real,
+        &pseudonym,
+        link_caps,
+        |peer: &Peer| if relay_hops == 0 { check(peer) } else { relay_peer(peer) },
+        rv15,
+        handshake_started,
+        &cancelled,
+        &mut *trace,
+    )?;
     let link_peer = *link.peer().public_key();
-    trace(
-        "link_done",
-        &format!(
-            "peer_pseudonymous={} peer_bit3={}",
-            link.peer().extensions().pseudonym,
-            link.peer().capabilities().transport & 8 != 0
-        ),
-    );
     // CF-CALL-08: both handshakes inside the callee's 20 s.
     let deadline = handshake_started + Duration::from_secs(CALL_HANDSHAKE_SECONDS);
 
-    // Endpoint handshake in BMS1 type-4 records (no BDO1: pseudonymous responder).
-    let mut hop_out =
-        Sealer::new(Layer::Hop, link.keys().send_key(), Policy::default()).map_err(at(Stage::Endpoint))?;
-    let mut hop_in =
-        HopReader::new(link.keys().receive_key(), Policy::default()).map_err(at(Stage::Endpoint))?;
+    // Endpoint handshake in BMS1 type-4 records, after the link opening.
     // The endpoint hello offers call video fragments (bit 7, CF-MEDIA-76).
     let endpoint_caps = Capabilities {
         transport: (if relay_hops == 0 { crate::call::fragments::endpoint_transport(link_caps.transport) } else { link_caps.transport }) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
@@ -791,6 +884,8 @@ pub fn dial_contact(
 
 #[cfg(test)]
 mod relay_tests;
+#[cfg(test)]
+mod opening_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

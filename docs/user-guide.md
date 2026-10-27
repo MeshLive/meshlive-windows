@@ -4,7 +4,8 @@ MeshLive makes private voice and video calls with people nearby over Bluetooth. 
 network and no account. This guide covers installing it, the first run, calls and contacts, common problems and how
 to remove it.
 
-MeshLive for Windows is in **beta** and has no published download yet. Until it does, build it from source
+MeshLive for Windows is in **beta**. Download the tester zip from the
+[releases page](https://github.com/MeshLive/meshlive-windows/releases/latest), or build it from source
 ([building.md](dev/building.md)).
 
 ## Requirements
@@ -24,9 +25,9 @@ A Store listing is planned. The Store will install MeshLive, keep it up to date 
 
 ### Release zip (testers)
 
-When a tester zip is published:
-
-1. Download the zip from the project's release page and check its SHA-256 against `SHA256SUMS` on that page.
+1. Download the zip and `SHA256SUMS` from the [releases page](https://github.com/MeshLive/meshlive-windows/releases/latest).
+   Check the zip in PowerShell with `Get-FileHash .\MeshLive-<version>-windows-x64.zip -Algorithm SHA256` and compare
+   the hash with the zip's line in `SHA256SUMS`. If they differ, delete the zip.
 2. Extract it to a folder you keep, for example a `MeshLive` folder in your Documents.
 3. Run `meshlive.exe`. Windows SmartScreen may show "Windows protected your PC" because the zip is not code-signed.
    If the hash matched, choose **More info**, then **Run anyway**.
@@ -76,6 +77,9 @@ the phone find Windows PCs.
   - Check Windows Settings > Privacy & security > Microphone and Camera, and allow MeshLive.
   - The call screen says when the microphone or camera is blocked.
 - **The other person hears an echo.** Use headphones, or lower the speaker volume.
+- **A call from a stranger ends with "Couldn't confirm who this is".** After you answer, a caller that is not a
+  contact has 10 seconds (more through relay phones) to prove who it is. Until it does, MeshLive sends none of your
+  sound or picture. A weak link can delay that proof: move closer and ask them to call again.
 - **"More than one phone is using this ID".** Another device may be copying an ID. The call still checks the other
   device before it shows who answered.
 - **The call screen says this PC is paired with the phone.** Windows paired with that phone earlier, so the phone's

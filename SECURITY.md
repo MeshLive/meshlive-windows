@@ -14,8 +14,6 @@ MeshLive for Windows is pre-release software. Security fixes go to:
 | `main` (development) | Yes |
 | Older releases | No. Please update to the latest release |
 
-Until the first release, only `main` exists.
-
 ## Reporting a vulnerability
 
 **Please do not open a public issue, pull request or discussion for a security problem.**
@@ -105,7 +103,7 @@ We list these so you can judge the risk for your own situation. They are open wo
   [switches.md](docs/dev/switches.md) is off by default and has had less review.
 - **Delete everything has stated limits**: it cannot reach copies outside the app, Windows logs or backups, and cannot
   promise erasure of flash storage.
-- **No signed release yet.** Until a signed Store package or a signed release exists, build from source and verify
-  what you run.
+- **No code-signed release yet.** Release zips are not code-signed. Check a zip against the `SHA256SUMS` of its
+  release, or build from source and verify what you run.
 
 Thank you for helping keep MeshLive users safe.

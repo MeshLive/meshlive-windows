@@ -229,7 +229,15 @@ pub fn tagged_handshake<C: Carrier>(
         .send(&frame_handshake(&m3).map_err(at(Stage::Link))?, deadline)
         .map_err(|e| fail(Stage::Link, &e))?;
     let link_peer = *link.peer().fingerprint();
-    let opening = link.peer().capabilities().transport & 8 != 0 && CAPABILITIES.transport & 8 != 0;
+    // This PC presents its real key; a pseudonymous answer never passes
+    // `check`, and would skip the opening anyway (Android `skipsLinkOpening`).
+    let opening = rotating::link_opening_exchanged(
+        true,
+        CAPABILITIES.transport,
+        link.peer().capabilities().transport,
+        link.own_pseudonym(),
+        link.peer().extensions().pseudonym,
+    );
     trace("qr_link_done", &format!("bdo1={opening}"));
     let deadline = handshake_started + Duration::from_secs(crate::dial::CALL_HANDSHAKE_SECONDS);
 
@@ -368,7 +376,8 @@ pub fn bmh2_handshake<C: Carrier, I: SigningIdentity>(
     };
     let link = pending.finish(&remote, &accept).map_err(at(Stage::Link))?;
     let link_peer = link.peer().fingerprint;
-    let opening = link.peer().capabilities.transport & 8 != 0 && CAPABILITIES.transport & 8 != 0;
+    // BMH2 has no pseudonyms: both hellos decide.
+    let opening = rotating::link_opening_exchanged(true, CAPABILITIES.transport, link.peer().capabilities.transport, false, false);
     trace("bmh2_link_done", &format!("bdo1={opening}"));
     let deadline = handshake_started + Duration::from_secs(crate::dial::CALL_HANDSHAKE_SECONDS);
     let policy = Policy {

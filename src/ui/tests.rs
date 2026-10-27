@@ -385,6 +385,7 @@ fn the_call_end_reason_from_the_core_names_how_the_call_ended() {
         (CallEndReason::Declined, "Declined"),
         (CallEndReason::Busy, "Busy"),
         (CallEndReason::Ended, "Call ended"),
+        (CallEndReason::Unconfirmed, "Couldn't confirm who this is"),
     ] {
         assert_eq!(reason.text(), text);
         let mut rig = Rig::full();

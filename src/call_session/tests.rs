@@ -1030,6 +1030,7 @@ fn a_pseudonymous_callee_session_reveals_right_before_its_accept_and_verifies_th
             .unwrap(),
         real: Box::new(callee_real),
         entries: vec![entry.clone()],
+        relay_hops: 0,
     });
     callee.accept(true).unwrap();
     // The caller accepts only because the REVEAL came first; then it reveals back.
@@ -1130,4 +1131,149 @@ fn audio_after_a_header_without_opus_fails_the_call() {
     assert!(callee.send(packet(AUDIO, 0, 20, 2)).unwrap());
     let wire = flush(&mut callee, 2 * MS);
     assert!(matches!(caller.on_input(&mut wire.as_slice(), 2 * MS), Err(Error::UndeclaredAudio)));
+}
+
+/// A pseudonym<->pseudonym call with this PC as the callee, up to (not
+/// including) its Accept. The caller holds a reveal gate only when `reveals`
+/// (a caller without one never reveals itself).
+fn pseudonym_call(reveals: bool) -> (CallSession<Fake>, CallSession<Fake>) {
+    use crate::{
+        bmh3::reveal::{ROLE_CALLEE, ROLE_CALLER, RevealSession},
+        records::{Layer, Policy, Sealer},
+        rotating::OpeningEntry,
+        session::tests::hex,
+    };
+    let v: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/android-vectors.json")).unwrap();
+    let spki = |name: &str| -> [u8; 91] { hex(v["link"][name]["ephemeralKey"].as_str().unwrap()).try_into().unwrap() };
+    let (caller_pseudo, callee_pseudo) = (spki("initiatorHello"), spki("responderHello"));
+    let (caller_real, callee_real, _) = identities();
+    let callee_real_spki = crate::bmh2::SigningIdentity::public_key(&callee_real).unwrap();
+    let callee_node: [u8; 16] = crate::crypto::sha256(&callee_real_spki).unwrap()[..16].try_into().unwrap();
+    let epoch = 1_990_656;
+    let entry = OpeningEntry::own(&[5; 32], &callee_node, epoch, 0).unwrap();
+    let exporter = [7u8; 32];
+    let (a, b, _) = identities();
+    let (al, bl) = handshake(&a, &b, Purpose::Link);
+    let (ae, be) = handshake(&a, &b, Purpose::Endpoint);
+    let link = |s: &crate::bmh2::SessionKeys, e: &crate::bmh2::SessionKeys| {
+        CallLink::continue_link(
+            Sealer::new(Layer::Hop, s.send_key(), Policy::default()).unwrap(),
+            crate::framing::HopReader::new(s.receive_key(), Policy::default()).unwrap(),
+            e.send_key(),
+            e.receive_key(),
+            false,
+            true,
+        )
+        .unwrap()
+    };
+    let mut caller = CallSession::<Fake>::outgoing(link(&al, &ae), ID, false, 0, header(), make, 0).unwrap();
+    if reveals {
+        caller.require_reveal(RevealGate {
+            session: RevealSession::new(ROLE_CALLER, &exporter, caller_pseudo, callee_pseudo, true, true, vec![caller_pseudo])
+                .unwrap(),
+            selected: entry.rdi,
+            rotating: true,
+            real: Box::new(caller_real),
+            wall_epoch: epoch,
+        });
+    }
+    let mut callee_link = link(&bl, &be);
+    let opening = flush(&mut caller, 0);
+    let mut input = opening.as_slice();
+    let mut invite = None;
+    while let Some(incoming) = callee_link.read(&mut input).unwrap() {
+        if let Incoming::Signal(m) = incoming {
+            invite.get_or_insert(m);
+        }
+    }
+    let (mut callee, _) = CallSession::<Fake>::incoming(callee_link, &invite.unwrap(), header(), make, 0).unwrap();
+    callee.reveal_on_accept(CalleeReveal {
+        session: RevealSession::new(ROLE_CALLEE, &exporter, callee_pseudo, caller_pseudo, true, true, vec![callee_pseudo])
+            .unwrap(),
+        real: Box::new(callee_real),
+        entries: vec![entry],
+        relay_hops: 0,
+    });
+    (caller, callee)
+}
+
+/// One round both ways at `now` (keeps both liveness timers fed).
+fn round(caller: &mut CallSession<Fake>, callee: &mut CallSession<Fake>, now: u64) -> (Vec<Notice>, Vec<Notice>) {
+    let wire = flush(caller, now);
+    let at_callee = callee.on_input(&mut wire.as_slice(), now).unwrap();
+    let wire = flush(callee, now);
+    let at_caller = caller.on_input(&mut wire.as_slice(), now).unwrap();
+    (at_caller, at_callee)
+}
+
+#[test]
+fn a_caller_that_withholds_its_reveal_is_hung_up_and_never_gets_the_callees_media() {
+    const S: u64 = 1_000_000_000;
+    let (mut caller, mut callee) = pseudonym_call(false);
+    let notices = callee.accept(false).unwrap();
+    assert!(!notices.iter().any(|n| matches!(n, Notice::StartMedia { .. })), "capture is held: {notices:?}");
+    assert!(callee.awaiting_caller_reveal());
+    // Capture offered while held is refused.
+    assert!(!callee.send(packet(AUDIO | CONFIG, 0, 3, 1)).unwrap());
+    // The REVEAL and Accept leave at 1 ms: the caller (no gate) accepts and
+    // starts its own media, which the callee drops.
+    let (at_caller, _) = round(&mut caller, &mut callee, MS);
+    assert_eq!(caller.phase(), call::Phase::NegotiatingMedia, "{at_caller:?}");
+    caller.media_ready().unwrap();
+    assert!(caller.send(packet(AUDIO | CONFIG, 0, 3, 1)).unwrap());
+    let mut caller_saw = at_caller;
+    for t in [2 * S, 4 * S, 6 * S, 8 * S, 10 * S] {
+        let (at_caller, at_callee) = round(&mut caller, &mut callee, t);
+        assert!(!at_callee.iter().any(|n| matches!(n, Notice::PeerHeader(_))), "an unconfirmed caller's header is dropped");
+        caller_saw.extend(at_caller);
+        assert!(!callee.unconfirmed(), "still inside the 10 s at {t}");
+    }
+    // 10 s after the REVEAL left: Hang-up/Error, and nothing of the callee's media was ever written.
+    let (at_caller, _) = round(&mut caller, &mut callee, 10 * S + MS);
+    caller_saw.extend(at_caller);
+    assert!(callee.unconfirmed());
+    assert!(caller_saw.contains(&Notice::Ended(call::Reason::Error)), "{caller_saw:?}");
+    assert!(!caller_saw.iter().any(|n| matches!(n, Notice::PeerHeader(_))), "no callee header");
+    let stats = callee.stats();
+    assert_eq!((stats.audio_sent, stats.video_sent), (0, 0));
+}
+
+#[test]
+fn a_late_but_valid_caller_reveal_releases_the_callees_media() {
+    const S: u64 = 1_000_000_000;
+    let (mut caller, mut callee) = pseudonym_call(true);
+    callee.accept(false).unwrap();
+    // The callee's REVEAL and Accept leave at 1 ms but the radio delivers
+    // them (and the callee's heartbeats) to the caller only at 8.9 s; the
+    // caller's heartbeats keep reaching the callee meanwhile.
+    let mut to_caller = flush(&mut callee, MS);
+    for t in [1_900 * MS, 3_900 * MS, 5_900 * MS, 7_900 * MS] {
+        let wire = flush(&mut caller, t);
+        assert!(callee.on_input(&mut wire.as_slice(), t).unwrap().is_empty());
+        to_caller.extend(flush(&mut callee, t));
+        assert!(!callee.unconfirmed());
+    }
+    let notices = caller.on_input(&mut to_caller.as_slice(), 8_900 * MS).unwrap();
+    assert!(notices.iter().any(|n| matches!(n, Notice::PeerRevealed { .. })), "{notices:?}");
+    // The caller's REVEAL reaches the callee at 9 s: inside its 10 s.
+    let wire = flush(&mut caller, 9 * S);
+    let notices = callee.on_input(&mut wire.as_slice(), 9 * S).unwrap();
+    assert!(notices.iter().any(|n| matches!(n, Notice::PeerRevealed { .. })), "{notices:?}");
+    assert!(notices.contains(&Notice::StartMedia { camera: true }), "{notices:?}");
+    assert!(!callee.awaiting_caller_reveal());
+    // The callee's held header now goes out, and the deadline no longer applies.
+    let wire = flush(&mut callee, 11 * S);
+    let at_caller = caller.on_input(&mut wire.as_slice(), 11 * S).unwrap();
+    assert!(at_caller.contains(&Notice::PeerHeader(header())), "{at_caller:?}");
+    assert!(!callee.unconfirmed());
+}
+
+#[test]
+fn the_caller_reveal_deadline_grows_per_relay_hop_up_to_40_s() {
+    const S: u64 = 1_000_000_000;
+    assert_eq!(caller_reveal_budget_ns(0), 10 * S);
+    assert_eq!(caller_reveal_budget_ns(1), 20 * S);
+    assert_eq!(caller_reveal_budget_ns(3), 40 * S);
+    assert_eq!(caller_reveal_budget_ns(9), 40 * S);
 }

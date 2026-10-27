@@ -92,6 +92,8 @@ pub enum CallEndReason {
     Declined,
     Busy,
     Ended,
+    /// The caller of a pseudonym<->pseudonym call did not prove who it is in time.
+    Unconfirmed,
 }
 impl CallEndReason {
     pub fn text(self) -> &'static str {
@@ -101,6 +103,7 @@ impl CallEndReason {
             CallEndReason::Declined => "Declined",
             CallEndReason::Busy => "Busy",
             CallEndReason::Ended => "Call ended",
+            CallEndReason::Unconfirmed => "Couldn't confirm who this is",
         }
     }
 }

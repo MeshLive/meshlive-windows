@@ -149,6 +149,13 @@ impl DeliveryEstimate {
             self.reset();
             return;
         }
+        // No byte counted yet: "0 bytes at 0 ms" has no arrival to time. Older Android releases
+        // and this app report it before the first media; mapped to the first write it set the
+        // delay floor the whole ring too low, and every later report read the ring as queue
+        // (PC-to-phone video calls, 2026-10-27: 10.4 / 13.3 s after 9.7 / 12.6 s of ringing).
+        if self.received == 0 {
+            return;
+        }
         // Delivered rate: the window of 800..2200 ms, or the last interval of >= 500 ms.
         self.history.push_back((self.received, self.peer_clock_ms));
         while self.history.len() > 64 {
@@ -460,5 +467,23 @@ mod tests {
         e.on_written(10, 0);
         e.on_report(2_000_000, 100, MS);
         assert_eq!(e.queue_ms(), None);
+    }
+
+    #[test]
+    fn a_report_before_the_first_arrival_is_no_sample() {
+        // The callee's link clock starts at the handshake; 10 s of ringing pass before this
+        // caller's first write, and a report says "0 bytes at 0 ms" before that write arrives.
+        let mut d = DeliveryEstimate::default();
+        d.on_written(25_000, 10_000 * MS);
+        d.on_report(0, 0, 10_100 * MS);
+        assert_eq!((d.delivered_kbps(), d.queue_ms()), (None, None));
+        // Then every write arrives 30 ms after it was written: no queue, 200 kbps.
+        d.on_report(25_000, 10_030, 10_030 * MS);
+        for s in 1..4u64 {
+            d.on_written(25_000, (10_000 + s * 1_000) * MS);
+            d.on_report((25_000 * (s + 1)) as u32, (10_000 + s * 1_000 + 30) as u32, (10_000 + s * 1_000 + 30) * MS);
+        }
+        assert_eq!(d.queue_ms(), Some(0), "the ring is not queue (it read 10030 ms)");
+        assert_eq!(d.delivered_kbps(), Some(200));
     }
 }

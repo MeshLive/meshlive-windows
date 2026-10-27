@@ -8,7 +8,7 @@
 //! a code-tag match runs the single-use reservation (`qr_display`) at msg1
 //! of both layers and commits at the completed end-to-end handshake. Real
 //! keys pass the identity gate. BDO1 is exchanged (own pinned entries) when
-//! both link hellos carry bit 3 and nobody is a pseudonym at the link.
+//! both link hellos carry bit 3: this PC's throwaway link block clears it.
 use crate::{
     bmh2::{Capabilities, SigningIdentity},
     bmh3::{
@@ -48,6 +48,13 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     decode_codecs: 0x03,
     maximum_bitrate_kbps: 1100,
     maximum_children: 0,
+};
+/// What this PC's throwaway signs in a LINK block as the responder: link-hello
+/// bit 3 cleared, so no `BDO1` (and no salt) follows (Android
+/// `Bmh3Presentation.stranger`). End-to-end blocks keep bit 3 (`BDX1` REVEAL).
+pub const STRANGER_LINK_CAPABILITIES: Capabilities = Capabilities {
+    transport: CAPABILITIES.transport & !rotating::LINK_OPENING_BIT,
+    ..CAPABILITIES
 };
 /// Android's callee deadline for both handshakes.
 pub const HANDSHAKE_SECONDS: u64 = 20;
@@ -95,6 +102,9 @@ pub struct Answered {
     pub peer_decode_codecs: u8,
     /// The caller's endpoint hello capabilities.
     pub peer_capabilities: Capabilities,
+    /// The end-to-end peer is not the authenticated link peer (a relayed
+    /// call); false on a direct link.
+    pub relayed: bool,
     /// The end-to-end exporter (REVEAL binding).
     pub exporter: [u8; 32],
     pub buffer: Vec<u8>,
@@ -145,7 +155,7 @@ pub fn respond<C: Carrier>(
     };
     let config = Config::new(Purpose::Link, listener.real, CAPABILITIES)
         .map_err(at(Stage::Link))?
-        .with_stranger(listener.pseudonym, CAPABILITIES)
+        .with_stranger(listener.pseudonym, STRANGER_LINK_CAPABILITIES)
         .map_err(at(Stage::Link))?;
     let options = ResponderOptions {
         mode: ResponderMode::Everyone,
@@ -208,9 +218,16 @@ pub fn respond<C: Carrier>(
             .map_err(|e| fail(Stage::Link, &e))?;
     }
     let link_peer = *link.peer().public_key();
-    let pseudonym_link = link.peer().extensions().pseudonym || link.own_pseudonym();
-    let opening_exchange =
-        !pseudonym_link && link.peer().capabilities().transport & 8 != 0 && CAPABILITIES.transport & 8 != 0;
+    // The responder skips only when it presented its throwaway (whose block
+    // cleared bit 3); its real key answering any initiator exchanges.
+    let own_hello = if link.own_pseudonym() { STRANGER_LINK_CAPABILITIES } else { CAPABILITIES };
+    let opening_exchange = rotating::link_opening_exchanged(
+        false,
+        own_hello.transport,
+        link.peer().capabilities().transport,
+        link.own_pseudonym(),
+        link.peer().extensions().pseudonym,
+    );
     trace("callee_link_done", &format!("tagged={} bdo1={opening_exchange}", link_tag.is_some()));
     let policy = Policy {
         require_opening: opening_exchange,
@@ -323,6 +340,7 @@ pub fn respond<C: Carrier>(
         negotiated,
         peer_decode_codecs: peer.capabilities().decode_codecs,
         peer_capabilities: peer.capabilities(),
+        relayed: *peer.public_key() != link_peer,
         exporter: *endpoint.keys().exporter(),
         link: CallLink::continue_link_with(
             hop_out,

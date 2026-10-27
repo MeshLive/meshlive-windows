@@ -119,6 +119,28 @@ pub struct CalleeReveal {
     pub session: RevealSession,
     pub real: Box<dyn SigningIdentity>,
     pub entries: Vec<OpeningEntry>,
+    /// Relay hops for the caller-reveal deadline: 0 on a direct link (the
+    /// authenticated link peer is the end-to-end peer) whatever the Invite
+    /// claims; the Invite's count only when they differ.
+    pub relay_hops: u8,
+}
+
+/// Caller-reveal deadline of a pseudonym<->pseudonym call (callee side):
+/// 10 s plus 10 s per relay hop, at most 40 s, from the moment this PC's
+/// REVEAL is written.
+pub fn caller_reveal_budget_ns(relay_hops: u8) -> u64 {
+    (10 + 10 * u64::from(relay_hops)).min(40) * 1_000_000_000
+}
+
+/// Callee of a pseudonym<->pseudonym call between its REVEAL and the
+/// caller's verified REVEAL: caller media/header are dropped and this PC's
+/// own header and capture are held (`held_start`).
+struct CallerRevealWait {
+    budget_ns: u64,
+    /// Set when this PC's REVEAL is written.
+    deadline: Option<u64>,
+    /// A StartMedia held until the caller is confirmed.
+    held_start: Option<bool>,
 }
 
 /// RV15, caller of a version 5 offer with a non-pseudonymous callee: the
@@ -159,6 +181,9 @@ pub struct CallSession<D> {
     make_decoder: fn(&[u8]) -> Result<D, opus::Error>,
     reveal: Option<RevealGate>,
     callee_reveal: Option<CalleeReveal>,
+    caller_reveal: Option<CallerRevealWait>,
+    /// The caller's REVEAL did not verify in time: Hang-up/Error queued.
+    unconfirmed: bool,
     opening: Option<OpeningGate>,
     /// The last keyframe request while the decoder waited (CF-MEDIA-44).
     last_key_request_ns: Option<i64>,
@@ -348,15 +373,35 @@ impl<D: UnitDecoder> CallSession<D> {
     pub fn reveal_on_accept(&mut self, reveal: CalleeReveal) {
         self.callee_reveal = Some(reveal);
     }
-    fn on_discovery(&mut self, record: &[u8]) -> Result<Option<Notice>, Error> {
+    /// The caller's REVEAL did not verify within its deadline; the call was
+    /// hung up with Error ("Couldn't confirm who this is").
+    pub fn unconfirmed(&self) -> bool {
+        self.unconfirmed
+    }
+    /// Waiting for the caller's REVEAL (its media dropped, this PC's held).
+    pub fn awaiting_caller_reveal(&self) -> bool {
+        self.caller_reveal.is_some()
+    }
+    fn on_discovery(&mut self, record: &[u8], notices: &mut Vec<Notice>) -> Result<(), Error> {
         if let Some(callee) = self.callee_reveal.as_mut() {
             if record.get(4) == Some(&4) {
+                if self.unconfirmed {
+                    return Ok(());
+                }
                 let verified = callee.session.on_peer_reveal(record).map_err(|_| Error::Reveal)?.clone();
                 crate::identity_gate::admit(&verified.node_id, &verified.fingerprint).map_err(|_| Error::Reveal)?;
-                return Ok(Some(Notice::PeerRevealed {
+                notices.push(Notice::PeerRevealed {
                     node_id: verified.node_id,
                     fingerprint: verified.fingerprint,
-                }));
+                });
+                // The caller is confirmed: this PC's held header and capture start now.
+                if let Some(CallerRevealWait { held_start, .. }) = self.caller_reveal.take()
+                    && let Some(camera) = held_start
+                {
+                    self.controls.push_back(Control::Header);
+                    notices.push(Notice::StartMedia { camera });
+                }
+                return Ok(());
             }
         }
         if record.len() > 4 && &record[..4] == b"BDX1" && matches!(record[4], 2 | 3) {
@@ -364,14 +409,15 @@ impl<D: UnitDecoder> CallSession<D> {
             if self.presence_in.len() < 8 {
                 self.presence_in.push(record.to_vec());
             }
-            return Ok(Some(Notice::PresenceRecord));
+            notices.push(Notice::PresenceRecord);
+            return Ok(());
         }
         let Some(gate) = self.reveal.as_mut() else {
             // Not a reveal exchange: BDX1 never fails a call (other kinds are hints).
-            return Ok(None);
+            return Ok(());
         };
         if record.get(4) != Some(&4) {
-            return Ok(None);
+            return Ok(());
         }
         let verified = gate
             .session
@@ -399,10 +445,11 @@ impl<D: UnitDecoder> CallSession<D> {
             .map_err(|_| Error::Reveal)?;
         // The caller reveal goes ahead of everything else still queued.
         self.controls.push_front(Control::Discovery(own));
-        Ok(Some(Notice::PeerRevealed {
+        notices.push(Notice::PeerRevealed {
             node_id: verified.node_id,
             fingerprint: verified.fingerprint,
-        }))
+        });
+        Ok(())
     }
     fn new(
         controller: Controller,
@@ -432,6 +479,8 @@ impl<D: UnitDecoder> CallSession<D> {
             make_decoder,
             reveal: None,
             callee_reveal: None,
+            caller_reveal: None,
+            unconfirmed: false,
             opening: None,
             presence_in: Vec::new(),
             last_key_request_ns: None,
@@ -519,6 +568,12 @@ impl<D: UnitDecoder> CallSession<D> {
                 Action::Send(message) => self.queue_signal(&message)?,
                 Action::Ring { voice } => notices.push(Notice::Ring { voice }),
                 Action::StartMedia { camera } => {
+                    // Pseudonym<->pseudonym callee: nothing of this PC's media
+                    // (header or capture) before the caller is confirmed.
+                    if let Some(wait) = self.caller_reveal.as_mut() {
+                        wait.held_start = Some(camera);
+                        continue;
+                    }
                     // Every endpoint describes its own outgoing stream first.
                     self.controls.push_back(Control::Header);
                     notices.push(Notice::StartMedia { camera });
@@ -544,6 +599,13 @@ impl<D: UnitDecoder> CallSession<D> {
                 .send_own(callee.real.as_ref(), &callee.entries)
                 .map_err(|_| Error::Reveal)?;
             self.controls.push_back(Control::Discovery(own));
+            // Both sides pseudonymous (send_own refuses otherwise): the
+            // caller's REVEAL must now verify within the deadline.
+            self.caller_reveal = Some(CallerRevealWait {
+                budget_ns: caller_reveal_budget_ns(callee.relay_hops),
+                deadline: None,
+                held_start: None,
+            });
         }
         let actions = self.controller.accept(voice)?;
         self.apply(actions)
@@ -637,7 +699,8 @@ impl<D: UnitDecoder> CallSession<D> {
                 video_limit,
             )
         };
-        if !allowed {
+        // Held until the caller of a pseudonym<->pseudonym call is confirmed.
+        if !allowed || self.caller_reveal.is_some() {
             return Ok(false);
         }
         if queue.len() >= limit {
@@ -668,6 +731,13 @@ impl<D: UnitDecoder> CallSession<D> {
             }
             return Err(Error::Dead);
         }
+        // The caller's REVEAL is overdue: hang up once with Error.
+        if !self.unconfirmed
+            && self.caller_reveal.as_ref().is_some_and(|w| w.deadline.is_some_and(|d| now_ns >= d))
+            && self.hang_up(Reason::Error).is_ok()
+        {
+            self.unconfirmed = true;
+        }
         if !self.sent_v1 {
             self.sent_v1 = true;
             self.liveness.sent(now_ns);
@@ -683,7 +753,16 @@ impl<D: UnitDecoder> CallSession<D> {
                 Control::Signal(message) => self.link.signal(&message)?,
                 Control::Header => self.link.header(&self.header)?,
                 Control::KeyFrameRequest => self.link.keyframe_request()?,
-                Control::Discovery(record) => self.link.discovery(&record)?,
+                Control::Discovery(record) => {
+                    // This PC's REVEAL leaves now: the caller's deadline starts.
+                    if record.get(4) == Some(&4)
+                        && let Some(wait) = self.caller_reveal.as_mut()
+                        && wait.deadline.is_none()
+                    {
+                        wait.deadline = Some(now_ns.saturating_add(wait.budget_ns));
+                    }
+                    self.link.discovery(&record)?
+                }
                 Control::Labels(container) => self.link.labels(&container)?,
             }));
         }
@@ -786,11 +865,9 @@ impl<D: UnitDecoder> CallSession<D> {
                     self.remote.push(message);
                     notices.extend(self.apply(actions)?);
                 }
-                Incoming::Discovery(record) => {
-                    if let Some(notice) = self.on_discovery(&record)? {
-                        notices.push(notice);
-                    }
-                }
+                Incoming::Discovery(record) => self.on_discovery(&record, &mut notices)?,
+                // An unconfirmed caller's header or media is dropped.
+                Incoming::Header(_) | Incoming::Media { .. } if self.caller_reveal.is_some() => {}
                 Incoming::Header(header) => {
                     // CF-MEDIA-51 / CF-CALL-15: exactly one header, in a codec
                     // both hellos authenticated (as Android: the call fails).

@@ -22,6 +22,28 @@ use windows::{
 #[derive(Default)]
 struct Admission {
     owner: Option<HSTRING>,
+    /// Values written before any phone was admitted, in arrival order, with
+    /// the writer's session: Windows can raise a phone's first write before
+    /// its subscription (2026-10-28 S24 call: the same millisecond, the
+    /// write first). They go to the pipe if that phone is admitted, else
+    /// they are dropped. Bounded by `HELD_MAX_VALUES` / `HELD_MAX_BYTES`.
+    held: Vec<(HSTRING, Vec<u8>, Instant)>,
+}
+const HELD_MAX_VALUES: usize = 64;
+const HELD_MAX_BYTES: usize = 32 * 1024;
+/// Only values written this recently before the admission count: the race is
+/// milliseconds, while a phone's late write after the last call ended (the
+/// 2026-10-28 00:37:56 first_write) must never reach the next call's pipe.
+const HELD_MAX_AGE: Duration = Duration::from_millis(1_500);
+/// What happens to one written value.
+#[derive(Debug, PartialEq, Eq)]
+enum Written {
+    /// The admitted phone's: into the pipe now.
+    Deliver,
+    /// No phone admitted yet: kept until one is.
+    Held,
+    /// Another phone's, or too much before admission.
+    Reject,
 }
 struct RequestSlot(Arc<AtomicUsize>);
 impl RequestSlot {
@@ -49,6 +71,40 @@ impl Admission {
     }
     fn owns(&self, peer: &HSTRING) -> bool {
         self.owner.as_ref() == Some(peer)
+    }
+    /// A write may go on to be read (no one admitted yet, or its owner).
+    fn may_write(&self, peer: &HSTRING) -> bool {
+        self.owner.as_ref().is_none_or(|owner| owner == peer)
+    }
+    /// Decides one value from `peer` (keeping it when no one is admitted yet).
+    fn on_value(&mut self, peer: &HSTRING, value: &[u8], now: Instant) -> Written {
+        match &self.owner {
+            Some(owner) if owner == peer => Written::Deliver,
+            Some(_) => Written::Reject,
+            None => {
+                self.held.retain(|(_, _, at)| now.saturating_duration_since(*at) <= HELD_MAX_AGE);
+                let bytes: usize = self.held.iter().map(|(_, v, _)| v.len()).sum();
+                if self.held.len() >= HELD_MAX_VALUES || bytes + value.len() > HELD_MAX_BYTES {
+                    return Written::Reject;
+                }
+                self.held.push((peer.clone(), value.to_vec(), now));
+                Written::Held
+            }
+        }
+    }
+    /// `claim`, returning the admitted phone's held values in order (the
+    /// rest are dropped).
+    fn admit(&mut self, peer: &HSTRING, now: Instant) -> Option<Vec<Vec<u8>>> {
+        if !self.claim(peer) {
+            return None;
+        }
+        let held = std::mem::take(&mut self.held);
+        Some(
+            held.into_iter()
+                .filter(|(writer, _, at)| writer == peer && now.saturating_duration_since(*at) <= HELD_MAX_AGE)
+                .map(|(_, v, _)| v)
+                .collect(),
+        )
     }
 }
 struct State {
@@ -356,8 +412,9 @@ impl Peripheral {
                 let owner = shared.lock().unwrap().admission.owns(&session);
                 write_log.lock().unwrap().push(format!("first_write service=c8d5a105 char=c8d5a103 peer={} admitted_subscriber={owner}", peer_tag(&session)));
             }
-            // Reject other centrals before allocating a deferred-request slot or reading their value.
-            if stop.load(Ordering::Acquire) || !shared.lock().unwrap().admission.owns(&session) {
+            // Reject other centrals before allocating a deferred-request slot or reading their value
+            // (a phone not yet admitted may write first; its values are held until it is).
+            if stop.load(Ordering::Acquire) || !shared.lock().unwrap().admission.may_write(&session) {
                 let _ = deferral.Complete();
                 return Err(windows::core::Error::from_hresult(windows::core::HRESULT(
                     0x80070005u32 as i32,
@@ -386,15 +443,23 @@ impl Peripheral {
             let completion = deferral.clone();
             let registered = operation.when(move |result| {
                 let _slot = slot;
-                let own = shared.lock().unwrap().admission.owns(&session);
+                let own = shared.lock().unwrap().admission.may_write(&session);
                 let process = || -> windows::core::Result<()> {
                     let request = result?;
-                    let state = shared.lock().unwrap();
+                    let mut state = shared.lock().unwrap();
                     let valid = own && !stop.load(Ordering::Acquire) && request.Offset()? == 0;
+                    // Decided under the lock, in completion order: the admitted
+                    // phone's value goes to the pipe; before any admission it is
+                    // held (the subscription can follow the first write).
                     let valid = valid
                         && read_buffer(&request.Value()?, 512)
-                            .map(|value| state.pipe.offer(&value).is_ok())
+                            .map(|value| match state.admission.on_value(&session, &value, Instant::now()) {
+                                Written::Deliver => state.pipe.offer(&value).is_ok(),
+                                Written::Held => true,
+                                Written::Reject => false,
+                            })
                             .unwrap_or(false);
+                    let own = state.admission.owns(&session);
                     if own && !valid {
                         stop.store(true, Ordering::Release);
                         state.pipe.abort(carrier::Error::InvalidValue);
@@ -409,7 +474,7 @@ impl Peripheral {
                     }
                     Ok(())
                 };
-                if process().is_err() && own {
+                if process().is_err() && shared.lock().unwrap().admission.owns(&session) {
                     stop.store(true, Ordering::Release);
                     shared.lock().unwrap().pipe.abort(carrier::Error::Backend);
                 }
@@ -464,8 +529,16 @@ impl Peripheral {
                 }
                 let client = clients.GetAt(0)?;
                 let session = client.Session()?;
-                if !state.admission.claim(&session.DeviceId()?.Id()?) {
+                let Some(held) = state.admission.admit(&session.DeviceId()?.Id()?, Instant::now()) else {
                     return Ok(());
+                };
+                // What this phone wrote before its subscription arrived, in order.
+                for value in held {
+                    if state.pipe.offer(&value).is_err() {
+                        stop.store(true, Ordering::Release);
+                        state.pipe.abort(carrier::Error::InvalidValue);
+                        return Ok(());
+                    }
                 }
                 let pipe = state.pipe.clone();
                 let stopped = stop.clone();
@@ -944,6 +1017,40 @@ mod tests {
         assert!(!admission.owns(&other));
         assert!(!admission.claim(&other));
         assert!(admission.owns(&first));
+    }
+    #[test]
+    fn a_write_before_the_subscription_is_held_and_delivered_in_order_on_admission() {
+        // 2026-10-28 S24 call: Windows raised the phone's first write in the
+        // same millisecond as, and before, its subscription; it was refused
+        // and the call setup stalled.
+        let mut admission = Admission::default();
+        let phone = HSTRING::from("phone");
+        let stranger = HSTRING::from("stranger");
+        assert!(admission.may_write(&phone) && admission.may_write(&stranger), "no one admitted yet");
+        let t = Instant::now();
+        assert_eq!(admission.on_value(&phone, b"hello", t), Written::Held);
+        assert_eq!(admission.on_value(&stranger, b"noise", t), Written::Held);
+        assert_eq!(admission.on_value(&phone, b"msg1", t), Written::Held);
+        let held = admission.admit(&phone, t + Duration::from_millis(5)).unwrap();
+        assert_eq!(held, vec![b"hello".to_vec(), b"msg1".to_vec()], "the phone's values, in order; the stranger's dropped");
+        assert_eq!(admission.on_value(&phone, b"next", t), Written::Deliver);
+        assert_eq!(admission.on_value(&stranger, b"x", t), Written::Reject);
+        assert!(!admission.may_write(&stranger));
+        assert!(admission.admit(&stranger, t).is_none(), "the first subscriber keeps the link");
+        assert!(admission.admit(&phone, t).unwrap().is_empty(), "held values go out once");
+        // Bounded before admission.
+        let mut flood = Admission::default();
+        let big = vec![0u8; 512];
+        let held = (0..200).filter(|_| flood.on_value(&stranger, &big, t) == Written::Held).count();
+        assert_eq!(held, HELD_MAX_BYTES / 512);
+        assert_eq!(flood.on_value(&stranger, &big, t), Written::Reject);
+        // A late write from the phone after its last call ended is stale by
+        // the time it subscribes for the next call: never replayed.
+        let mut next = Admission::default();
+        assert_eq!(next.on_value(&phone, b"old call's last write", t), Written::Held);
+        let later = t + Duration::from_secs(9);
+        assert_eq!(next.on_value(&phone, b"new hello", later), Written::Held);
+        assert_eq!(next.admit(&phone, later + Duration::from_millis(3)).unwrap(), vec![b"new hello".to_vec()]);
     }
     #[test]
     fn native_advertising_parameters_never_enable_friendly_name_discovery() {

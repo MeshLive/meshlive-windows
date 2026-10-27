@@ -265,9 +265,8 @@ impl Ui {
         } else {
             let height = (ui.available_height() - bar - 52.0).max(120.0);
             let texture = if state != WatchState::Playing || watch.source_state.camera_off { None } else { self.video };
-            let backdrop = self.peer_backdrop.as_ref().map(|t| t.id());
             // The same video area as a call: upright, never stretched to 16:9.
-            video_stage(ui, egui::vec2(ui.available_width(), height), "Live video", &status, texture.map(|id| (id, self.peer_size)), backdrop);
+            video_stage(ui, egui::vec2(ui.available_width(), height), "Live video", &status, texture.map(|id| (id, self.peer_size)));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label(theme::body(&status));
@@ -736,14 +735,12 @@ impl Ui {
                 ui.add_space(8.0);
                 let height = ui.available_height().max(48.0);
                 let texture = if phase == Phase::Active && peer_camera { self.video } else { None };
-                let backdrop = self.peer_backdrop.as_ref().map(|t| t.id());
                 let area = video_stage(
                     ui,
                     egui::vec2(ui.available_width(), height),
                     "Other person's video",
                     if peer_camera { "Connecting\u{2026}" } else { "Video off" },
                     texture.map(|id| (id, self.peer_size)),
-                    backdrop,
                 );
                 // The controls float over the bottom of the picture: a soft shade keeps them readable.
                 if texture.is_some() {
@@ -1483,34 +1480,21 @@ impl Ui {
 }
 
 /// The video area: the picture as large as fits (FIT, never stretched,
-/// already upright), with rounded corners; the sides it leaves are filled
-/// with a dark, blurred copy of itself (no empty framed box). Without a
-/// picture, a quiet panel with the state.
+/// already upright), with rounded corners, on plain black (no framed box).
+/// Without a picture, a quiet panel with the state.
 pub(super) fn video_stage(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     name: &str,
     status: &str,
     texture: Option<(egui::TextureId, [u32; 2])>,
-    backdrop: Option<egui::TextureId>,
 ) -> egui::Rect {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size.x.max(0.0), size.y.max(0.0)), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("{name}. {status}")));
     let radius = 16;
     match texture {
         Some((id, picture)) => {
-            match backdrop {
-                Some(soft) => {
-                    egui::Image::new((soft, rect.size()))
-                        .uv(call_layout::fill_uv(rect, picture))
-                        .tint(Color32::from_gray(64))
-                        .corner_radius(radius)
-                        .paint_at(ui, rect);
-                }
-                None => {
-                    ui.painter().rect_filled(rect, radius, Color32::BLACK);
-                }
-            }
+            ui.painter().rect_filled(rect, radius, Color32::BLACK);
             let (shown, _) = call_layout::fit(rect, picture, 0);
             egui::Image::new((id, shown.size())).corner_radius(radius).paint_at(ui, shown);
         }

@@ -152,8 +152,6 @@ pub struct Ui {
     test: test_hooks::State,
     peer_seen: u64,
     peer_texture: Option<egui::TextureHandle>,
-    /// A tiny blurred copy of the peer's picture for the sides of the video area.
-    peer_backdrop: Option<egui::TextureHandle>,
     pub peer_size: [u32; 2],
     pub peer_turns: u8,
     /// This PC's own camera in a call (the self-view): the slot, the last
@@ -284,7 +282,6 @@ impl Ui {
             test: Default::default(),
             peer_seen: 0,
             peer_texture: None,
-            peer_backdrop: None,
             peer_size: [16, 9],
             peer_turns: 0,
             self_pictures: None,
@@ -719,7 +716,6 @@ impl Ui {
         self.watch_note = None;
         self.peer_pictures = None;
         self.peer_texture = None;
-        self.peer_backdrop = None;
         self.video = None;
         self.backend.command(Command::Watch(id));
         self.focus_primary = true;
@@ -828,8 +824,7 @@ impl Ui {
         if self.call.is_none() && self.watch.is_none() {
             if self.peer_pictures.take().is_some() {
                 self.peer_texture = None;
-                self.peer_backdrop = None;
-                self.video = None;
+                        self.video = None;
                 self.peer_seen = 0;
             }
             return;
@@ -848,15 +843,6 @@ impl Ui {
         match self.peer_texture.as_mut() {
             Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
             None => self.peer_texture = Some(ctx.load_texture("peer-video", image, egui::TextureOptions::LINEAR)),
-        }
-        // A tiny copy, drawn large and dark, softly fills the sides.
-        let (bw, bh, small) = call_layout::backdrop_rgba(&upright, w, h, 16);
-        if bw > 0 {
-            let image = egui::ColorImage::from_rgba_unmultiplied([bw, bh], &small);
-            match self.peer_backdrop.as_mut() {
-                Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
-                None => self.peer_backdrop = Some(ctx.load_texture("peer-backdrop", image, egui::TextureOptions::LINEAR)),
-            }
         }
         self.video = self.peer_texture.as_ref().map(|t| t.id());
         self.peer_size = [w as u32, h as u32];

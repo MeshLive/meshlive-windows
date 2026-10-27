@@ -163,7 +163,7 @@ The wire format and security rules are shared by every MeshLive app and live in
 | Repository | What it is |
 | --- | --- |
 | [meshlive-android](https://github.com/MeshLive/meshlive-android) | The Android app; owns the protocol and the design records |
-| [meshlive-ios](https://github.com/MeshLive/meshlive-ios) | iPhone app (early) |
+| [meshlive-apple](https://github.com/MeshLive/meshlive-apple) | iPhone and Mac app (early) |
 | [meshlive-benchmarks](https://github.com/MeshLive/meshlive-benchmarks) | Measured results on real phones |
 | [meshlive.github.io](https://meshlive.github.io) | Website and privacy policy |
 

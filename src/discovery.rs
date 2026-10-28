@@ -208,7 +208,10 @@ impl Announcement {
         {
             return Err(Error::Fields);
         }
-        if (!audio && self.summary & !(7 | if kind == 0 { 0x10 } else { 0 }) != 0)
+        // Design HC: the compact layout's three codec bits are VP9, AV1 and
+        // H.264 (bit 56, pencilled; an open design question). HEVC
+        // (summary 0x80) is not representable and is negotiated in the hello.
+        if (!audio && self.summary & !(7 | crate::video::codecs::SUMMARY_HEVC | if kind == 0 { 0x10 } else { 0 }) != 0)
             || (audio && (self.width != 0 || self.height != 0 || self.fps != 0))
             || (kind == 0 && self.token != 0)
             || (kind != 0 && self.token & 0x80000000 == 0)

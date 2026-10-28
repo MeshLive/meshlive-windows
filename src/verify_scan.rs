@@ -201,7 +201,7 @@ pub fn tagged_handshake<C: Carrier>(
         })
     };
     // Link layer.
-    let config = Config::new(Purpose::Link, identity, CAPABILITIES).map_err(at(Stage::Link))?;
+    let config = Config::new(Purpose::Link, identity, crate::video::hello_codecs(CAPABILITIES, false)).map_err(at(Stage::Link))?;
     let (waiting, m1) = Waiting2::start(config, options()?).map_err(at(Stage::Link))?;
     carrier
         .send(&frame_handshake(&m1).map_err(at(Stage::Link))?, deadline)
@@ -279,12 +279,13 @@ pub fn tagged_handshake<C: Carrier>(
 
     // End-to-end layer in BMS1 type-4 records.
     // A contact call goes through here too: offer call video fragments (bit 7).
-    let endpoint_caps = Capabilities {
+    let endpoint_caps = crate::video::hello_codecs(Capabilities {
         transport: crate::call::fragments::endpoint_transport(CAPABILITIES.transport) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
-        // The decoders this PC really has (CF-HS-02), not a constant.
+        // The decoders this PC really has (CF-HS-02), not a constant; Design
+        // HC's masks (with bit 4) through `hello_codecs`.
         decode_codecs: crate::video::decode_mask(),
         ..CAPABILITIES
-    };
+    }, true);
     let config = Config::new(Purpose::Endpoint, identity, endpoint_caps).map_err(at(Stage::Endpoint))?;
     let (waiting, m1) = Waiting2::start(config, options()?).map_err(at(Stage::Endpoint))?;
     carrier
@@ -357,7 +358,7 @@ pub fn bmh2_handshake<C: Carrier, I: SigningIdentity>(
         }
         Ok(())
     };
-    let pending = Pending::start(identity, Role::Initiator, CAPABILITIES, P2::Link).map_err(at(Stage::Link))?;
+    let pending = Pending::start(identity, Role::Initiator, crate::video::hello_codecs(CAPABILITIES, false), P2::Link).map_err(at(Stage::Link))?;
     carrier
         .send(&frame_handshake(&pending.hello().encode()).map_err(at(Stage::Link))?, deadline)
         .map_err(|e| fail(Stage::Link, &e))?;
@@ -407,7 +408,9 @@ pub fn bmh2_handshake<C: Carrier, I: SigningIdentity>(
         }
         rotating::decode_bdo1(&record.plaintext).map_err(at(Stage::Link))?;
     }
-    let pending = Pending::start(identity, Role::Initiator, CAPABILITIES, P2::Endpoint).map_err(at(Stage::Endpoint))?;
+    // The BMH2 end-to-end hello (phones with BMH3 off): before Design HC's
+    // fix it always said 0x03, while the header could name HEVC.
+    let pending = Pending::start(identity, Role::Initiator, crate::video::hello_codecs(CAPABILITIES, true), P2::Endpoint).map_err(at(Stage::Endpoint))?;
     carrier
         .send(&hop_out.seal(4, 0, &pending.hello().encode()).map_err(at(Stage::Endpoint))?, deadline)
         .map_err(|e| fail(Stage::Endpoint, &e))?;

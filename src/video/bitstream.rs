@@ -354,7 +354,7 @@ fn vp9_colour(r: &mut Bits<'_>, profile: u32) -> Result<()> {
 
 /// Consume one Android-style raw OBU. Size-less final OBUs consume the
 /// remaining access unit, matching Android's parser; no Annex B guessing.
-fn obu<'a>(input: &mut &'a [u8]) -> Result<(u8, &'a [u8])> {
+pub(super) fn obu<'a>(input: &mut &'a [u8]) -> Result<(u8, &'a [u8])> {
     let mut take = || {
         let (&byte, rest) = input.split_first().ok_or(Malformed)?;
         *input = rest;

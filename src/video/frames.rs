@@ -6,13 +6,35 @@
 //! record is a no-op (VP9 carries none in practice); an AV1 one (av1C or raw
 //! OBUs) is kept and its configuration OBUs are spliced into each following
 //! keyframe's temporal unit, after its temporal delimiter.
-use super::{DecodeDevice, DecodedFrame, Decoder, VideoFormat};
+//!
+//! Design AD: when no Media Foundation AV1 decoder starts, an AV1 session
+//! uses the bundled dav1d instead (dav1d::choose), on this same thread and
+//! with the same presenter: its pictures arrive as NV12 texture samples.
+use super::{
+    DecodeDevice, DecodeError, DecodedFrame, Decoder, VideoFormat,
+    dav1d::{self, Choice, Dav1dSession},
+};
 use crate::{media::VideoHeader, viewer::FrameDecoder};
+
+/// Which decoders a session may use. Auto is the app's; the others are
+/// for tests and probes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecoderPolicy {
+    Auto,
+    MediaFoundationOnly,
+    /// As if no Media Foundation decoder started.
+    Dav1dOnly,
+}
+enum Active<'a> {
+    MediaFoundation(Decoder<'a>),
+    Dav1d(Dav1dSession<'a>),
+}
 
 pub struct MfFrames<'a, P: FnMut(i64, &DecodedFrame<'_>)> {
     owner: &'a DecodeDevice,
     header: VideoHeader,
-    decoder: Option<Decoder<'a>>,
+    decoder: Option<Active<'a>>,
+    policy: DecoderPolicy,
     present: P,
     av1_config: Option<Vec<u8>>,
     /// Why the last configure, push or pull failed (the trait reports `()`).
@@ -47,9 +69,24 @@ impl<'a, P: FnMut(i64, &DecodedFrame<'_>)> MfFrames<'a, P> {
             owner,
             header,
             decoder: None,
+            policy: DecoderPolicy::Auto,
             present,
             av1_config: None,
             last_error: None,
+        }
+    }
+    pub fn with_policy(mut self, policy: DecoderPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+}
+impl<P: FnMut(i64, &DecodedFrame<'_>)> MfFrames<'_, P> {
+    /// "media-foundation", "dav1d", or None before a successful configure.
+    pub fn backend(&self) -> Option<&'static str> {
+        match self.decoder {
+            Some(Active::MediaFoundation(_)) => Some("media-foundation"),
+            Some(Active::Dav1d(_)) => Some("dav1d"),
+            None => None,
         }
     }
 }
@@ -61,7 +98,21 @@ impl<P: FnMut(i64, &DecodedFrame<'_>)> MfFrames<'_, P> {
         self.decoder = None;
         // AV1 uses the newest configuration; none means in-band only.
         self.av1_config = (self.header.codec == 3).then_some(newest).flatten().map(|c| av1_config_obus(c).to_vec());
-        match Decoder::open(self.owner, self.header) {
+        let mf = match self.policy {
+            DecoderPolicy::Dav1dOnly => Err(DecodeError::Unsupported),
+            _ => Decoder::open(self.owner, self.header),
+        };
+        // The startup check runs only when it could matter.
+        let dav1d_ready = mf.is_err() && self.policy != DecoderPolicy::MediaFoundationOnly && self.header.codec == 3 && dav1d::ready();
+        let opened = match (dav1d::choose(self.header.codec, mf.is_ok(), dav1d_ready), mf) {
+            (Choice::MediaFoundation, Ok(decoder)) => Ok(Active::MediaFoundation(decoder)),
+            (Choice::Dav1d, Err(_)) => Dav1dSession::open(self.owner, self.header, self.av1_config.as_deref())
+                .map(Active::Dav1d)
+                .map_err(DecodeError::from),
+            (_, Err(error)) => Err(error),
+            (_, Ok(_)) => Err(DecodeError::Unsupported),
+        };
+        match opened {
             Ok(decoder) => self.decoder = Some(decoder),
             Err(error) => {
                 self.last_error = Some(format!("open {}x{} codec {}: {error:?}", self.header.width, self.header.height, self.header.codec));
@@ -86,10 +137,19 @@ impl<P: FnMut(i64, &DecodedFrame<'_>)> FrameDecoder for MfFrames<'_, P> {
             self.last_error = Some("push without a decoder".into());
             return Err(());
         };
-        let result = match (&self.av1_config, key) {
-            (Some(obus), true) => decoder.push(&splice_av1_config(obus, payload), pts_us, key),
-            _ => decoder.push(payload, pts_us, key),
+        let spliced = match (&self.av1_config, key) {
+            (Some(obus), true) => Some(splice_av1_config(obus, payload)),
+            _ => None,
         };
+        let unit = spliced.as_deref().unwrap_or(payload);
+        let result = match decoder {
+            Active::MediaFoundation(decoder) => decoder.push(unit, pts_us, key),
+            Active::Dav1d(session) => session.push(unit, pts_us, key).map_err(DecodeError::from),
+        };
+        if result.is_err() && matches!(decoder, Active::Dav1d(_)) {
+            // Fail closed like the MF decoder: the session is discarded.
+            self.decoder = None;
+        }
         result.map_err(|error| {
             self.last_error = Some(format!("push {} bytes key={key}: {error:?}", payload.len()));
         })
@@ -101,9 +161,23 @@ impl<P: FnMut(i64, &DecodedFrame<'_>)> FrameDecoder for MfFrames<'_, P> {
         let Some(decoder) = self.decoder.as_mut() else {
             return Ok(None);
         };
-        let pulled = decoder.pull().map_err(|error| {
-            self.last_error = Some(format!("pull: {error:?}"));
-        })?;
+        let owner = self.owner;
+        let pulled = match decoder {
+            Active::MediaFoundation(decoder) => decoder.pull(),
+            Active::Dav1d(session) => session
+                .pull()
+                .map(|out| out.map(|(sample, format, timestamp)| DecodedFrame::new(sample, owner, format, timestamp))),
+        };
+        let pulled = match pulled {
+            Ok(pulled) => pulled,
+            Err(error) => {
+                self.last_error = Some(format!("pull: {error:?}"));
+                if matches!(self.decoder, Some(Active::Dav1d(_))) {
+                    self.decoder = None;
+                }
+                return Err(());
+            }
+        };
         let Some(frame) = pulled else {
             return Ok(None);
         };

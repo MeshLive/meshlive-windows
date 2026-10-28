@@ -979,7 +979,9 @@ impl Ui {
             // Rename, Safety code, Block and Forget wait behind "More" (Android's
             // contact sheet), so the list is names and calls only.
             let open = self.contact_more == Some(contact.id);
-            let (call, picked, toggled) = self.person_card(ui, contact.id, &contact.name, &contact.subtitle(), enabled, true, wide || index + 1 == count, wide, (!wide).then_some(open));
+            // The row draws no divider of its own here: the one after its
+            // notes below separates contacts (one line, never two).
+            let (call, picked, toggled) = self.person_card(ui, contact.id, &contact.name, &contact.subtitle(), enabled, true, true, wide, (!wide).then_some(open));
             if picked {
                 self.selected_contact = Some(contact.id);
             }
@@ -1020,11 +1022,14 @@ impl Ui {
                     self.forget = Some(contact.id);
                 }
             }); }
+            // Notes line up under the contact's name (the row's text inset).
             let caption = |ui: &mut egui::Ui, text: String| {
-                ui.horizontal(|ui| {
+                ui.horizontal_top(|ui| {
                     ui.add_space(inset);
-                    ui.set_max_width(theme::READABLE_WIDTH);
-                    ui.add(egui::Label::new(RichText::new(text).size(13.0).color(SECONDARY)).wrap());
+                    ui.vertical(|ui| {
+                        ui.set_max_width(theme::READABLE_WIDTH);
+                        ui.add(egui::Label::new(RichText::new(text).size(13.0).color(SECONDARY)).wrap());
+                    });
                 });
             };
             if contact.blocked {
@@ -1279,7 +1284,17 @@ impl Ui {
                             if chip(ui, &format!("{w} × {h}"), (self.live_settings.width, self.live_settings.height) == (w, h), true).clicked() { self.live_settings.width = w; self.live_settings.height = h; }
                         }});
                         ui.horizontal_wrapped(|ui| { for fps in [15, 24, 30] { if chip(ui, &format!("{fps} fps"), self.live_settings.fps == fps, true).clicked() { self.live_settings.fps = fps; } }});
-                        ui.horizontal_wrapped(|ui| { for (label, codec) in [("VP9", 2), ("AV1 (hardware)", 3)] { if chip(ui, label, self.live_settings.codec == codec, true).clicked() { self.live_settings.codec = codec; } }});
+                        let switches = meshlive::video::codecs::Switches::current();
+                        // Two fixed rows: in this scroll area horizontal_wrapped did not
+                        // wrap, so four codec chips ran past a 640 px window and widened
+                        // the page (and the bitrate slider) beyond it.
+                        for row in [[("VP9", 2), ("AV1 (hardware)", 3)], [("HEVC (hardware)", 5), ("H.264 (hardware)", 4)]] {
+                            if !row.iter().any(|(_, codec)| switches.codec_on(*codec)) { continue; }
+                            ui.horizontal_wrapped(|ui| { for (label, codec) in row {
+                                if !switches.codec_on(codec) { continue; }
+                                if chip(ui, label, self.live_settings.codec == codec, true).clicked() { self.live_settings.codec = codec; }
+                            }});
+                        }
                         ui.add_space(8.0);
                         components::value_slider(ui, "Video bitrate", &mut self.live_settings.kbps, 100..=1500, 25, "kbps");
                     } else {

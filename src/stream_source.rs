@@ -77,7 +77,9 @@ impl Default for Settings {
 impl Settings {
     pub fn valid(self) -> bool {
         [(426, 240), (640, 360), (854, 480)].contains(&(self.width, self.height)) && [15, 24, 30].contains(&self.fps)
-            && (100..=1500).contains(&self.kbps) && self.kbps % 25 == 0 && [2, 3].contains(&self.codec) && (1..=3).contains(&self.radio_preset)
+            && (100..=1500).contains(&self.kbps) && self.kbps % 25 == 0 && (1..=3).contains(&self.radio_preset)
+            // Design HC: hardware HEVC and H.264 with their masters on.
+            && (matches!(self.codec, 2 | 3) || matches!(self.codec, 4 | 5) && crate::video::codecs::Switches::current().codec_on(self.codec))
     }
     pub fn video_header(self) -> crate::media::VideoHeader {
         crate::media::VideoHeader { width: self.width as u16, height: self.height as u16, fps: self.fps as u8, codec: self.codec, quarter_turns: 0, opus: true }
@@ -90,7 +92,7 @@ impl Settings {
 pub fn offer(settings: Settings, radio: bool, entry: &OpeningEntry, logical: u32, paused: bool, full: bool) -> Result<Announcement, String> {
     if !settings.valid() || entry.role != rotating::ROLE_STREAM_OFFER { return Err("Invalid live settings".into()); }
     Ok(Announcement { version: 5, prefix: entry.rdi, flags: STREAM | GATT | if paused { PAUSED } else { 0 },
-        summary: if radio { 0x40 } else if settings.codec == 2 { 1 } else { 2 }, token: advertise::route_token(logical, &entry.rdi).map_err(debug)?,
+        summary: if radio { 0x40 } else { crate::video::codecs::summary_bit(settings.codec) }, token: advertise::route_token(logical, &entry.rdi).map_err(debug)?,
         cost: 0, sequence: if full { 0x80 } else { 0 }, width: if radio { 0 } else { settings.width as u16 },
         height: if radio { 0 } else { settings.height as u16 }, fps: if radio { 0 } else { settings.fps as u8 },
         bitrate: if radio { advertise::rounded_bitrate(match settings.radio_preset { 1 => 16, 2 => 24, _ => 48 }) } else { settings.kbps as u16 }, recovery: None })
@@ -113,7 +115,7 @@ pub fn admit<C: Carrier, I: SigningIdentity>(
             || !e.opens(&e.rdi, &own, rotating::ROLE_STREAM_OFFER).unwrap_or(false)) {
         return Err("Source opening isn't ready".into());
     }
-    let codec = if radio { 0 } else if settings.codec == 2 { 1 } else { 2 };
+    let codec = if radio { 0 } else { crate::video::codecs::hello_bit(settings.codec) };
     let caps = Capabilities { transport: 0x0c, encode_codecs: codec, decode_codecs: 0, maximum_bitrate_kbps: settings.kbps as u16, maximum_children: 0 };
     let pending = Pending::start(identity, Role::Initiator, caps, Purpose::Link).map_err(debug)?;
     c.send(&frame_handshake(&pending.hello().encode()).map_err(debug)?, deadline)?;

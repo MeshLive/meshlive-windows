@@ -212,6 +212,9 @@ pub fn dial_bmh2(
     let reached = crate::verify_scan::bmh2_handshake(&mut central, prefix, identity, &cancelled, &mut *trace)?;
     let peer_discovery = reached.negotiated;
     let (header, video_plan) = crate::call_video::header_for(reached.peer_capabilities.decode_codecs, &encoders());
+    trace("video_plan", &format!("codec={} encoders={} peer_decode={:#04x} peer_encode={:#04x}", header.codec, video_plan.len(),
+        reached.peer_capabilities.decode_codecs, reached.peer_capabilities.encode_codecs));
+    trace("encoder_choice", &crate::call_video::choice_line(reached.peer_capabilities.decode_codecs, &encoders()));
     let mut session = CallSession::<opus::Decoder>::outgoing(
         reached.link,
         call_id,
@@ -452,10 +455,9 @@ pub fn pull(central: &Central, buffer: &mut Vec<u8>, wait: Duration) -> Result<b
 /// software AV1 encoder is assumed.
 pub fn encoders() -> crate::video::Availability {
     crate::video::encoder_availability().unwrap_or_else(|_| crate::video::Availability {
-        av1_hardware: Vec::new(),
-        vp9_hardware: Vec::new(),
         av1_software: crate::video::aom_version(),
         vp9_software: crate::video::vpx_version(),
+        ..Default::default()
     })
 }
 
@@ -642,13 +644,13 @@ fn dial_selected_route(
     // Bit 3 stays in these capabilities for the end-to-end hello (BDX1:
     // OPENING and REVEAL). The throwaway's link block has it cleared by the
     // BMH3 layer, so the link hello promises no BDO1 (`caller_link`).
-    let link_caps = Capabilities {
+    let link_caps = crate::video::hello_codecs(Capabilities {
         transport: 0x0c,
         encode_codecs: 0x03,
         decode_codecs: 0x03,
         maximum_bitrate_kbps: 1100,
         maximum_children: 0,
-    };
+    }, false);
     let check = |peer: &Peer| selected_peer(peer, &rdi, version5, wall, who);
     let handshake_started = Instant::now();
     // RV15 on the link opening: a direct call to a selected v5 offer. A
@@ -671,12 +673,14 @@ fn dial_selected_route(
 
     // Endpoint handshake in BMS1 type-4 records, after the link opening.
     // The endpoint hello offers call video fragments (bit 7, CF-MEDIA-76).
-    let endpoint_caps = Capabilities {
+    let endpoint_caps = crate::video::hello_codecs(Capabilities {
         transport: (if relay_hops == 0 { crate::call::fragments::endpoint_transport(link_caps.transport) } else { link_caps.transport }) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
-        // The decoders this PC really has (CF-HS-02), not a constant.
+        // The decoders this PC really has (CF-HS-02), not a constant; Design
+        // HC's masks (with bit 4) through `hello_codecs`.
         decode_codecs: crate::video::decode_mask(),
+        encode_codecs: 0x03,
         ..link_caps
-    };
+    }, true);
     let config = stranger_config(Purpose::Endpoint, &real, &pseudonym, endpoint_caps).map_err(at(Stage::Endpoint))?;
     // A contact tag belongs only to the callee, never to the first-hop relay.
     let tag = who.map(|contact| {
@@ -752,8 +756,9 @@ fn dial_selected_route(
     let (header, video_plan) = crate::call_video::header_for(peer_caps.decode_codecs, &encoders());
     trace(
         "video_plan",
-        &format!("codec={} encoders={}", header.codec, video_plan.len()),
+        &format!("codec={} encoders={} peer_decode={:#04x} peer_encode={:#04x}", header.codec, video_plan.len(), peer_caps.decode_codecs, peer_caps.encode_codecs),
     );
+    trace("encoder_choice", &crate::call_video::choice_line(peer_caps.decode_codecs, &encoders()));
     let start = Instant::now();
     let mut session = CallSession::<opus::Decoder>::outgoing(
         call_link,
@@ -875,6 +880,9 @@ pub fn dial_contact(
     let peer_discovery = reached.negotiated;
     trace("endpoint_done", &format!("contact=1 negotiated={peer_discovery}"));
     let (header, video_plan) = crate::call_video::header_for(reached.peer_capabilities.decode_codecs, &encoders());
+    trace("video_plan", &format!("codec={} encoders={} peer_decode={:#04x} peer_encode={:#04x}", header.codec, video_plan.len(),
+        reached.peer_capabilities.decode_codecs, reached.peer_capabilities.encode_codecs));
+    trace("encoder_choice", &crate::call_video::choice_line(reached.peer_capabilities.decode_codecs, &encoders()));
     let start = Instant::now();
     let mut session = CallSession::<opus::Decoder>::outgoing(
         reached.link,

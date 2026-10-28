@@ -39,7 +39,9 @@ What `Build.ps1` does:
    `sources.lock.json` (CMake, NASM, GNU make), checks each SHA-256 before extracting, and builds libopus with the
    static CRT. Its `__FILE__` paths are trimmed (`/d1trimfile`), so no build folder ends up in the app.
 2. `scripts/native_encoder.py` does the same for libaom 3.14.1 (software AV1) and libvpx 1.17.0 (software VP9).
-3. Cargo builds and tests the app with `--locked` (exact versions from `Cargo.lock`) and one job at a time, so the
+3. `scripts/native_decoder.py` builds dav1d 1.5.3 (software AV1 decoding, used only when no Media Foundation AV1
+   decoder starts) with Meson 1.9.1 and Ninja 1.13.0 run from their pinned wheels, also with trimmed paths.
+4. Cargo builds and tests the app with `--locked` (exact versions from `Cargo.lock`) and one job at a time, so the
    build fits on a laptop with limited memory. The release profile links the C runtime statically
    (`.cargo/config.toml`). Release builds also remap the checkout and crate-cache paths
    (`--remap-path-prefix`) and name the PDB without its folder, so the exe embeds no build-machine path.
@@ -57,6 +59,7 @@ use the WARP software renderer where no GPU is present.
 | `MESH_FXC` | Path to the Windows SDK `fxc.exe` used by `build.rs` and the vendored renderer to compile the HLSL shaders |
 | `MESH_OPUS_LIB` | Folder holding the static libopus built by `native_audio.py` |
 | `MESH_AOM_LIB`, `MESH_VPX_LIB` | Folders holding the static libaom and libvpx built by `native_encoder.py` |
+| `MESH_DAV1D_LIB` | Folder holding the static dav1d built by `native_decoder.py` |
 
 Running `cargo` directly after one `Build.ps1` run:
 
@@ -64,6 +67,7 @@ Running `cargo` directly after one `Build.ps1` run:
 $env:MESH_FXC = 'C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/fxc.exe'
 $native = "$PWD\.artifacts\native\x86_64-pc-windows-msvc"
 $env:MESH_OPUS_LIB = "$native\opus"; $env:MESH_AOM_LIB = "$native\aom"; $env:MESH_VPX_LIB = "$native\vpx"
+$env:MESH_DAV1D_LIB = "$native\dav1d"
 cargo test --locked --release --target x86_64-pc-windows-msvc --jobs 2 -- --test-threads=1
 ```
 

@@ -216,7 +216,7 @@ fn play(p: &mut Peripheral, joined: &mut stream_watch::Joined, pin: &mut Option<
                         crate::phone_checks::WATCH_DISTINCT_RELAY_HEADERS.fetch_add(1, Ordering::Relaxed);
                     }
                     if let Header::Video(h) = header {
-                        let bit = if h.codec == 2 { 1 } else { 2 };
+                        let bit = meshlive::video::codecs::hello_bit(h.codec);
                         if joined.codec_mask & bit == 0 { return Err("The authenticated stream codec wasn't offered or decodable.".into()); }
                     }
                     *pin = Some(joined.source);
@@ -241,6 +241,8 @@ fn play(p: &mut Peripheral, joined: &mut stream_watch::Joined, pin: &mut Option<
                                 }
                             }));
                             let _ = out.send(Update::CallPictures(PictureHandle(pictures.clone())));
+                            // Design AD: whether a dav1d fallback was checked or used (MF stays first).
+                            if header.codec == 3 { crate::radio_backend::trace("av1_decoder", &meshlive::video::dav1d::summary()); }
                         }
                     }
                 }
@@ -249,7 +251,11 @@ fn play(p: &mut Peripheral, joined: &mut stream_watch::Joined, pin: &mut Option<
                     if packet.flags & meshlive::media::ROTATION != 0 { pictures.set_turns(packet.rotation().map_err(debug)?); }
                     else if !state.paused && packet.flags & meshlive::media::AUDIO != 0 {
                         audio.on_packet(packet, now_ns, &mut clock, |csd| meshlive::opus::Decoder::new(csd, meshlive::opus::Profile::StreamOrCall)).map_err(debug)?;
-                    } else if !state.paused { if let Some(video) = video.as_mut() { video.on_packet(packet, now_ns, &mut clock).map_err(debug)?; } }
+                    } else if !state.paused { if let Some(video) = video.as_mut() {
+                        video.on_packet(packet, now_ns, &mut clock).map_err(debug)?;
+                        // Design HC: au_reject / au_unusual lines.
+                        for line in video.take_au_log() { crate::radio_backend::trace("video_au", &line); }
+                    } }
                 }
                 Event::State(3) => {
                     sound.stop_now();

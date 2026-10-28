@@ -17,7 +17,7 @@ use crate::{
     media::VideoHeader,
     video::{
         Availability, Backend, DecodeDevice, EncodeError, EncoderSettings, MASK_AV1, MASK_VP9, SourceEncoder,
-        SourceError, VideoEncoder, encoder_plan,
+        SourceError, VideoEncoder,
     },
 };
 use std::time::{Duration, Instant};
@@ -28,12 +28,28 @@ pub const HEIGHT: u16 = 240;
 pub const FPS: u8 = 15;
 pub const BITRATE_KBPS: u32 = 200;
 
-/// The codec the call header announces: the first encoder in Android's order
-/// for the peer's decode mask, or None when there is no common codec (the call
-/// stays voice-only: the header then names the peer's first decodable codec
-/// and no picture is ever sent).
+/// The codec the call header announces: the first encoder of the one choice
+/// operation for this direction (`codecs::for_call`: today's Android order
+/// with both Design HC masters off), or None when there is no common codec
+/// (the call stays voice-only: the header then names the peer's first
+/// decodable codec and no picture is ever sent).
 pub fn header_for(peer_decode: u8, available: &Availability) -> (VideoHeader, Vec<(u8, Backend)>) {
-    let plan = encoder_plan(peer_decode, available);
+    header_with(peer_decode, crate::video::advertised_encode_mask(), available, crate::video::codecs::Switches::current())
+}
+/// `BENCHMARK encoder_choice` for this direction (Design HC labels).
+pub fn choice_line(peer_decode: u8, available: &Availability) -> String {
+    let switches = crate::video::codecs::Switches::current();
+    crate::video::codecs::for_call(peer_decode, available, switches).line(Some(peer_decode), switches)
+}
+/// `own_encode`: the encode mask this PC's end-to-end hello advertised; the
+/// peer refuses a header codec outside it ("did not authenticate use of its
+/// call codec"), so entries outside it are dropped.
+pub fn header_with(peer_decode: u8, own_encode: u8, available: &Availability, switches: crate::video::codecs::Switches) -> (VideoHeader, Vec<(u8, Backend)>) {
+    let plan: Vec<(u8, Backend)> = crate::video::codecs::for_call(peer_decode, available, switches)
+        .list
+        .into_iter()
+        .filter(|(codec, _)| own_encode & crate::video::codecs::hello_bit(*codec) != 0)
+        .collect();
     let codec = match plan.first() {
         Some((codec, _)) => *codec,
         None if peer_decode & MASK_VP9 != 0 => 2,
@@ -573,7 +589,30 @@ mod tests {
             vp9_hardware: if vp9_hw { vec!["vp9".into()] } else { vec![] },
             av1_software: "libaom".into(),
             vp9_software: "libvpx".into(),
+            ..Availability::default()
         }
+    }
+
+    #[test]
+    fn with_a_master_on_the_header_announces_hevc_from_the_one_choice() {
+        use crate::video::codecs::{HELLO_HEVC, Switches};
+        let on = Switches { hevc: true, ..Switches::LEGACY };
+        let a = Availability { hevc_hardware: vec!["hevc".into()], ..available(false, false) };
+        let advertised = MASK_VP9 | MASK_AV1 | HELLO_HEVC;
+        let (h, plan) = header_with(MASK_VP9 | MASK_AV1 | HELLO_HEVC, advertised, &a, on);
+        assert_eq!((h.codec, plan), (5, vec![(5, Backend::Hardware)]));
+        // An old peer (decode mask 0x03) falls back along the same list.
+        let (h, plan) = header_with(MASK_VP9 | MASK_AV1, advertised, &a, on);
+        assert_eq!((h.codec, plan), (3, vec![(3, Backend::SoftwareAv1)]));
+        // Masters off: today's header, whatever the peer advertises.
+        assert_eq!(header_with(MASK_VP9 | HELLO_HEVC, MASK_VP9 | MASK_AV1, &a, Switches::LEGACY).0.codec, 2);
+        // The PC never announces a codec its own hello did not advertise
+        // (phone run 2026-10-28: a 0x03 hello, then an HEVC header, and the
+        // phone ended the call): HEVC is skipped, VP9 is next.
+        let (h, plan) = header_with(MASK_VP9 | MASK_AV1 | HELLO_HEVC, MASK_VP9 | MASK_AV1, &a, on);
+        assert_eq!((h.codec, plan), (3, vec![(3, Backend::SoftwareAv1)]));
+        let (h, _) = header_with(MASK_VP9 | HELLO_HEVC, MASK_VP9 | MASK_AV1, &a, on);
+        assert_eq!(h.codec, 2);
     }
 
     #[test]

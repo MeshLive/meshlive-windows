@@ -153,9 +153,9 @@ pub fn respond<C: Carrier>(
         }
         pull(carrier, &mut buffer, Stage::Link, deadline, cancelled)?;
     };
-    let config = Config::new(Purpose::Link, listener.real, CAPABILITIES)
+    let config = Config::new(Purpose::Link, listener.real, crate::video::hello_codecs(CAPABILITIES, false))
         .map_err(at(Stage::Link))?
-        .with_stranger(listener.pseudonym, STRANGER_LINK_CAPABILITIES)
+        .with_stranger(listener.pseudonym, crate::video::hello_codecs(STRANGER_LINK_CAPABILITIES, false))
         .map_err(at(Stage::Link))?;
     let options = ResponderOptions {
         mode: ResponderMode::Everyone,
@@ -263,12 +263,13 @@ pub fn respond<C: Carrier>(
         return Err(fail(Stage::Endpoint, "unexpected hop record type"));
     }
     // The endpoint hello offers call video fragments (bit 7, CF-MEDIA-76).
-    let endpoint_caps = Capabilities {
+    let endpoint_caps = crate::video::hello_codecs(Capabilities {
         transport: crate::call::fragments::endpoint_transport(CAPABILITIES.transport) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
-        // The decoders this PC really has (CF-HS-02), not a constant.
+        // The decoders this PC really has (CF-HS-02), not a constant; Design
+        // HC's masks (with bit 4) through `hello_codecs`.
         decode_codecs: crate::video::decode_mask(),
         ..CAPABILITIES
-    };
+    }, true);
     let config = Config::new(Purpose::Endpoint, listener.real, endpoint_caps)
         .map_err(at(Stage::Endpoint))?
         .with_stranger(listener.pseudonym, endpoint_caps)

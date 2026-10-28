@@ -1,0 +1,132 @@
+{
+ "format": "meshlive-hc-vectors-1",
+ "codec": "HEVC",
+ "codecId": 5,
+ "encoder": "c2.exynos.hevc.encoder",
+ "hardware": true,
+ "profile": 1,
+ "level": 2097152,
+ "width": 352,
+ "height": 288,
+ "fps": 15,
+ "bitrateBps": 100000,
+ "bitrateMode": "CBR",
+ "input": "raw",
+ "device": "samsung SM-S921B",
+ "sdk": 36,
+ "source": "MeshLive Android hc-vectors (first 16 access units), HEVC_c2.exynos.hevc.encoder_352x288_1793136594225",
+ "accessUnits": [
+  {
+   "file": "au-000.bin",
+   "keyFrame": true,
+   "ptsUs": 41715694665,
+   "bytes": 3623,
+   "sha256": "efddc6dcbbb5b3069094adfde2dab102e9021ce7ead1a6c433716cfa2851d770"
+  },
+  {
+   "file": "au-001.bin",
+   "keyFrame": false,
+   "ptsUs": 41715761331,
+   "bytes": 1256,
+   "sha256": "36291aa7558c0d6cb364cd842119c584ad756289ea7cd4fe4a76ea0a847d90e2"
+  },
+  {
+   "file": "au-002.bin",
+   "keyFrame": false,
+   "ptsUs": 41715827998,
+   "bytes": 829,
+   "sha256": "cdbb0a9a7642c2f8ec7135db4d2edb60b42a55e4bd8f4d6460768dadcd607c7c"
+  },
+  {
+   "file": "au-003.bin",
+   "keyFrame": false,
+   "ptsUs": 41715894665,
+   "bytes": 675,
+   "sha256": "c7b640b0549a8ccc6334f0b986b45418408c60b30ae363d7dd450341fdc2335d"
+  },
+  {
+   "file": "au-004.bin",
+   "keyFrame": false,
+   "ptsUs": 41715961331,
+   "bytes": 615,
+   "sha256": "6ad0749e422a44970141e1cc1805e26eb9c90375e2afd54220f4026d95c496a8"
+  },
+  {
+   "file": "au-005.bin",
+   "keyFrame": false,
+   "ptsUs": 41716027998,
+   "bytes": 597,
+   "sha256": "52741c10a121c42b278b9f84aab5c2cf66c161ec31a7585b77f4d9d12779ccce"
+  },
+  {
+   "file": "au-006.bin",
+   "keyFrame": false,
+   "ptsUs": 41716094665,
+   "bytes": 607,
+   "sha256": "31ef2de99a9d7a92c23e91c2b87ed01fd532923a05a6c1743d1ffc3e8e4b4eb6"
+  },
+  {
+   "file": "au-007.bin",
+   "keyFrame": false,
+   "ptsUs": 41716161331,
+   "bytes": 609,
+   "sha256": "589d1ae3094ee6f84361bb266bb5a0cd188a9f1128e9aa250aca6a0c4d6e0f3e"
+  },
+  {
+   "file": "au-008.bin",
+   "keyFrame": false,
+   "ptsUs": 41716227998,
+   "bytes": 595,
+   "sha256": "b262581c9307cbffd72a0671d1eba7b6755217c45951e9a34c53793634f3eb9a"
+  },
+  {
+   "file": "au-009.bin",
+   "keyFrame": false,
+   "ptsUs": 41716294665,
+   "bytes": 606,
+   "sha256": "a20d3a24eaab0ebf6dfa86ad25317a507fc49625ab68a13cae3afadb37f30bbe"
+  },
+  {
+   "file": "au-010.bin",
+   "keyFrame": false,
+   "ptsUs": 41716361331,
+   "bytes": 572,
+   "sha256": "4240debff2d235f271ec05efb1eb16b653734b0a5377ed47f627964457828c6a"
+  },
+  {
+   "file": "au-011.bin",
+   "keyFrame": false,
+   "ptsUs": 41716427998,
+   "bytes": 677,
+   "sha256": "687c72c9dff1962dc8bbf073df3af4fe76a4c6ee288b54861ad8affdca246ece"
+  },
+  {
+   "file": "au-012.bin",
+   "keyFrame": false,
+   "ptsUs": 41716494665,
+   "bytes": 592,
+   "sha256": "31b8f8da2bcf2f2ef4a634898c89cd7b8f231bd2358a7425df73d66c53b45079"
+  },
+  {
+   "file": "au-013.bin",
+   "keyFrame": false,
+   "ptsUs": 41716561331,
+   "bytes": 621,
+   "sha256": "a81374f524630f302ddd29fe5866c56d8ef1ea4c962a78f3051c65b3fd25a033"
+  },
+  {
+   "file": "au-014.bin",
+   "keyFrame": true,
+   "ptsUs": 41716627998,
+   "bytes": 4214,
+   "sha256": "25fb25d765bc80bdac65c5321d1e14adc0cec4d7efa7845b536a04d88b0bdf94"
+  },
+  {
+   "file": "au-015.bin",
+   "keyFrame": true,
+   "ptsUs": 41716694665,
+   "bytes": 3547,
+   "sha256": "3586a889d233b4c2cdd9ae834ec489c7e3c778f99c62882709de26dae6610d94"
+  }
+ ]
+}

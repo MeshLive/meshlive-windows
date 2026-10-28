@@ -874,6 +874,8 @@ fn codec_name(codec: u8) -> &'static str {
     match codec {
         2 => "VP9",
         3 => "AV1",
+        4 => "H.264",
+        5 => "HEVC",
         _ => "unknown",
     }
 }
@@ -2243,6 +2245,8 @@ impl Worker {
                                 } else {
                                     call.peer_video = Box::new(meshlive::viewer::DecodeThread::media_foundation(header, present));
                                     trace("peer_video_decoder", "thread=true");
+                                    // Design AD: whether a dav1d fallback was checked or used (MF stays first).
+                                    if header.codec == 3 { trace("av1_decoder", &meshlive::video::dav1d::summary()); }
                                     updates.push(Update::CallPictures(crate::ui::backend::PictureHandle(call.pictures.clone())));
                                 }
                                 if call.media && !call.active_shown {
@@ -2359,6 +2363,10 @@ impl Worker {
             let now = call.dialed.now_ns() as i64;
             if let Err(error) = call.dialed.session.pump_video(&mut call.peer_video, now, 20_000_000) {
                 trace("peer_video_failed", &format!("{error:?}"));
+            }
+            // Design HC: au_reject / au_unusual lines of the peer's HEVC or H.264.
+            if let Some(video) = call.dialed.session.video() {
+                for line in video.take_au_log() { trace("video_au", &line); }
             }
             stage[2] = tick_started.elapsed();
             updates.extend(call.pump_audio(now));
@@ -2500,6 +2508,7 @@ impl Worker {
                 self.set_visible(false, Some(reason.into()));
                 return;
             }
+            trace("announce_step", "own_offer");
             let Some(offer) = self.own_offer() else {
                 // No node ID or day key yet (an unusable presence store
                 // announces ephemeral keys instead, CF-PRES-07): retry.

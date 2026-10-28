@@ -110,8 +110,22 @@ impl CallOffer {
 pub const STREAM_LEN: usize = 23;
 pub const KIND_VIEWER_REQUEST: u8 = 1;
 pub const KIND_STREAM_OFFER: u8 = 2;
-/// capabilitySummary bits a kind 2 offer may carry: codecs and audio only.
-const OFFER_SUMMARY: u8 = 0x07 | 0x40;
+/// capabilitySummary bits a kind 2 offer may carry: codecs (Design HC adds
+/// HEVC's 0x80, which old strict readers hide) and audio only.
+const OFFER_SUMMARY: u8 = 0x07 | 0x40 | crate::video::codecs::SUMMARY_HEVC;
+
+/// The kind-0 packed codec field from hello codec bits (review 2 F11): VP9,
+/// AV1 and H.264 hints only; HEVC is never put there (bit 3 is the route
+/// cost) and is negotiated in the authenticated hello. With both Design HC
+/// masters off the field is exactly today's (`hello & 7`); with one on, the
+/// PC's real encoders and decoders replace the 0x03 constant.
+pub fn call_offer_codecs(constant: u8) -> u8 {
+    use crate::video::codecs;
+    if !codecs::Switches::current().any() {
+        return constant & 7;
+    }
+    codecs::hello_to_summary(crate::video::encode_mask() & crate::video::decode_mask()) & 0x07
+}
 
 /// Any PC announcement, decoded strictly in PROTOCOL's order (version,
 /// kind, length, fields).

@@ -1,0 +1,132 @@
+{
+ "format": "meshlive-hc-vectors-1",
+ "codec": "HEVC",
+ "codecId": 5,
+ "encoder": "OMX.qcom.video.encoder.hevc",
+ "hardware": true,
+ "profile": 1,
+ "level": 2097152,
+ "width": 352,
+ "height": 288,
+ "fps": 15,
+ "bitrateBps": 100000,
+ "bitrateMode": "CBR",
+ "input": "raw",
+ "device": "asus ASUS_I01WD",
+ "sdk": 30,
+ "source": "MeshLive Android hc-vectors (first 16 access units), HEVC_OMX.qcom.video.encoder.hevc_352x288_1793137483497",
+ "accessUnits": [
+  {
+   "file": "au-000.bin",
+   "keyFrame": true,
+   "ptsUs": 200171715251,
+   "bytes": 3313,
+   "sha256": "cac276f31c87a5595c63a0fff610626c96c7b03b020b6ba5fe1a8324e1b91443"
+  },
+  {
+   "file": "au-001.bin",
+   "keyFrame": false,
+   "ptsUs": 200171781917,
+   "bytes": 994,
+   "sha256": "e4ff0287932a436fd65395d023515bcc051295cfe82a06918cedb375b19808ad"
+  },
+  {
+   "file": "au-002.bin",
+   "keyFrame": false,
+   "ptsUs": 200171848584,
+   "bytes": 978,
+   "sha256": "bceff79815b734b1f891ad83b732d3dab4a65199a4d590185e4799456112b61c"
+  },
+  {
+   "file": "au-003.bin",
+   "keyFrame": false,
+   "ptsUs": 200171915251,
+   "bytes": 369,
+   "sha256": "a8399990e84938d1941d58530becb9673c1be1fa2e257496ed6f3e92c1fe31cd"
+  },
+  {
+   "file": "au-004.bin",
+   "keyFrame": false,
+   "ptsUs": 200171981917,
+   "bytes": 398,
+   "sha256": "84a285e52b355a0c7fd217c1e5de4d6642a9c05a9922ce245d1b4be563a90a5b"
+  },
+  {
+   "file": "au-005.bin",
+   "keyFrame": false,
+   "ptsUs": 200172048584,
+   "bytes": 644,
+   "sha256": "c85efebd605541731aaf11815556911428b14b0ce171c0abd7a67e0eb8eebe18"
+  },
+  {
+   "file": "au-006.bin",
+   "keyFrame": false,
+   "ptsUs": 200172115251,
+   "bytes": 664,
+   "sha256": "6b55f32d22f7854c2e999892934d1ba525717b251185ae0494c65d8a922ee4d5"
+  },
+  {
+   "file": "au-007.bin",
+   "keyFrame": false,
+   "ptsUs": 200172181917,
+   "bytes": 684,
+   "sha256": "1fa65ebd2f3fcd45b244c171587bab7299769afe88a509064e336f490fd87f1b"
+  },
+  {
+   "file": "au-008.bin",
+   "keyFrame": false,
+   "ptsUs": 200172248584,
+   "bytes": 552,
+   "sha256": "279cd3e4be3113245128a1dbeafab9ec95cce0a62f3b924cb6cbd99700a9fb82"
+  },
+  {
+   "file": "au-009.bin",
+   "keyFrame": false,
+   "ptsUs": 200172315251,
+   "bytes": 557,
+   "sha256": "8455a4cf5de36f8d7ed771fe8dcfd37ee2da6b79199c30cc742ceeeafba81622"
+  },
+  {
+   "file": "au-010.bin",
+   "keyFrame": false,
+   "ptsUs": 200172381917,
+   "bytes": 718,
+   "sha256": "da1edca3feabe55dfedd791d2b5b9679b7244e2d1af8e49b9a9af3eb37f9e9f3"
+  },
+  {
+   "file": "au-011.bin",
+   "keyFrame": false,
+   "ptsUs": 200172448584,
+   "bytes": 901,
+   "sha256": "01d1f1f95f6717a5934cd2db9d723158c46083710dac0c2aafc5c7f4c80b1f22"
+  },
+  {
+   "file": "au-012.bin",
+   "keyFrame": false,
+   "ptsUs": 200172515251,
+   "bytes": 715,
+   "sha256": "a71396381cda849e94da9a9c41ef6c231d6df3875e9b90f82d4aa6b5de46492f"
+  },
+  {
+   "file": "au-013.bin",
+   "keyFrame": false,
+   "ptsUs": 200172581917,
+   "bytes": 636,
+   "sha256": "bfc484e7573f4f298894aeb494112a107f0877a0a898c89518c01eddca6869b1"
+  },
+  {
+   "file": "au-014.bin",
+   "keyFrame": false,
+   "ptsUs": 200172648584,
+   "bytes": 857,
+   "sha256": "30423f57a0dbf6302dc62469fa34e90d8dee53da3b58a65b64f3f538d2d3dac0"
+  },
+  {
+   "file": "au-015.bin",
+   "keyFrame": true,
+   "ptsUs": 200172715251,
+   "bytes": 2679,
+   "sha256": "46da41209e57e6f0ea8bfff9939080e5a3c0dae7268212ce7d1877dc5c003ba3"
+  }
+ ]
+}

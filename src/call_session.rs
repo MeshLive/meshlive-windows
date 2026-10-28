@@ -1021,13 +1021,10 @@ impl<D: UnitDecoder> CallSession<D> {
 /// CF-MEDIA-66 (Android `CallPlayoutPolicy.SPEECH_LED_VIDEO_GROWTH_LIMIT_MS`).
 pub const SPEECH_LED_VIDEO_GROWTH_LIMIT_MS: i64 = 150;
 
-/// The capability-mask bit of a BTV3 codec (2 VP9, 3 AV1; others none).
+/// The capability-mask bit of a BTV3 codec (2 VP9, 3 AV1; Design HC 4
+/// H.264, 5 HEVC; others none), from the one codec table.
 pub fn codec_mask(codec: u8) -> u8 {
-    match codec {
-        2 => crate::video::MASK_VP9,
-        3 => crate::video::MASK_AV1,
-        _ => 0,
-    }
+    crate::video::codecs::hello_bit(codec)
 }
 
 #[cfg(test)]

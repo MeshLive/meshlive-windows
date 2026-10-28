@@ -452,7 +452,9 @@ impl<'a> ListRow<'a> {
                 let title_w = ui.painter().layout_no_wrap(self.title.to_owned(), Type::RowTitle.font(), theme::TEXT).size().x + check;
                 let value_w = ui.painter().layout_no_wrap(value.clone(), Type::Subtitle.font(), theme::TEXT_SECONDARY).size().x;
                 let room = width - inset - chevron_w;
-                (title_w + 24.0 + value_w > room).then(|| {
+                // Beside the title a value gets at most 40 % of the row (it is
+                // drawn cut there), so a longer one also goes under the title.
+                (title_w + 24.0 + value_w > room || value_w > width * 0.4).then(|| {
                     let dim = if ui.is_enabled() { theme::TEXT_SECONDARY } else { theme::TEXT_DISABLED };
                     wrapped(ui, value, Type::Subtitle.font(), dim, (room - 12.0).max(40.0))
                 })

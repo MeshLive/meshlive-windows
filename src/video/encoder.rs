@@ -1,4 +1,5 @@
-//! Media Foundation hardware VP9/AV1 encoding from NV12 frames. Hardware
+//! Media Foundation hardware VP9/AV1 (and, Design HC, HEVC/H.264) encoding
+//! from NV12 frames. Hardware
 //! encoder MFTs are asynchronous: they are unlocked explicitly and driven by
 //! their NeedInput/HaveOutput events, polled with a bounded deadline (never a
 //! blocking wait). Settings follow Android's encoder rules: constant bitrate,
@@ -6,8 +7,11 @@
 //! system-memory NV12, so no capture device or camera is involved; the caller
 //! supplies frames (the generated test pattern in tests and probes).
 use super::DecodeDevice;
+use super::annexb::{Codec, Gate, Packetiser, session_level};
+use super::codecs::Switches;
 use std::{
     mem::ManuallyDrop,
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use windows::{
@@ -43,7 +47,7 @@ type Result<T> = std::result::Result<T, EncodeError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EncoderSettings {
-    /// 2 = VP9, 3 = AV1 (the BTV3 codec numbers).
+    /// 2 = VP9, 3 = AV1, 4 = H.264, 5 = HEVC (the BTV3 codec numbers).
     pub codec: u8,
     pub width: u32,
     pub height: u32,
@@ -57,8 +61,25 @@ impl EncoderSettings {
         match self.codec {
             2 => Ok(MFVideoFormat_VP90),
             3 => Ok(MFVideoFormat_AV1),
+            4 => Ok(MFVideoFormat_H264),
+            5 => Ok(MFVideoFormat_HEVC),
             _ => Err(EncodeError::Input),
         }
+    }
+    /// Design HC: the Media Foundation profiles to try, in order (HEVC Main;
+    /// H.264 High, Main, then Constrained Baseline), and the session level
+    /// (the lowest covering one, `annexb::session_level`) unless its control
+    /// arm is off. None for VP9 and AV1.
+    fn hc_profiles(&self) -> Option<(&'static [u32], Option<u32>)> {
+        let codec = Codec::of(self.codec)?;
+        let profiles: &'static [u32] = match codec {
+            Codec::Hevc => &[eAVEncH265VProfile_Main_420_8.0 as u32],
+            Codec::H264 => &[eAVEncH264VProfile_High.0 as u32, eAVEncH264VProfile_Main.0 as u32, eAVEncH264VProfile_ConstrainedBase.0 as u32],
+        };
+        let level = Switches::current()
+            .session_level
+            .then(|| session_level(codec, self.width, self.height, self.fps, self.bitrate_kbps * 1000));
+        Some((profiles, level))
     }
     pub(crate) fn frame_bytes(&self) -> usize {
         (self.width * self.height * 3 / 2) as usize
@@ -97,6 +118,8 @@ pub struct Encoder<'a> {
     draining: bool,
     controls: Vec<(&'static str, i32)>,
     inputs: u64,
+    /// Design HC: the output profile and level that the MFT accepted.
+    profile_level: Option<(u32, Option<u32>)>,
 }
 impl Drop for Encoder<'_> {
     fn drop(&mut self) {
@@ -234,6 +257,19 @@ fn trace_open(name: &str, step: &str, error: &windows::core::Error) {
     }
 }
 
+/// The output type with the Design HC profile and level, when given.
+fn output_type(subtype: GUID, s: &EncoderSettings, profile_level: Option<(u32, Option<u32>)>) -> Result<IMFMediaType> {
+    let value = video_type(subtype, s)?;
+    if let Some((profile, level)) = profile_level {
+        unsafe {
+            value.SetUINT32(&MF_MT_MPEG2_PROFILE, profile)?;
+            if let Some(level) = level {
+                value.SetUINT32(&MF_MT_MPEG2_LEVEL, level)?;
+            }
+        }
+    }
+    Ok(value)
+}
 fn video_type(subtype: GUID, s: &EncoderSettings) -> Result<IMFMediaType> {
     let value = unsafe { MFCreateMediaType()? };
     unsafe {
@@ -360,11 +396,62 @@ impl<'a> Encoder<'a> {
                 let code = unsafe { api.SetValue(id, &value) }.map_or_else(|e| e.code().0, |_| 0);
                 controls.push((label, code));
             }
+            // Design HC: no B-frames (one picture per access unit, no
+            // reordering) and closed GOPs; the emitted NAL types are checked
+            // by the packetiser, not assumed from these results. Measured
+            // 2026-10-28: NVIDIA's H.264 and HEVC MFTs reject both setters
+            // (E_INVALIDARG), yet emit neither B-frames nor reordering at low
+            // latency; the start check and the receiver gate verify output.
+            if settings.hc_profiles().is_some() {
+                let hc: [(&'static str, &GUID, VARIANT); 2] = [
+                    ("no B-frames", &CODECAPI_AVEncMPVDefaultBPictureCount, VARIANT::from(0u32)),
+                    ("closed GOP", &CODECAPI_AVEncMPVGOPOpen, VARIANT::from(false)),
+                ];
+                for (label, id, value) in hc {
+                    let code = unsafe { api.SetValue(id, &value) }.map_or_else(|e| e.code().0, |_| 0);
+                    controls.push((label, code));
+                }
+            }
+        }
+        // Design HC: the first profile (then level) the MFT accepts; VP9/AV1
+        // keep today's single attempt.
+        let attempts: Vec<Option<(u32, Option<u32>)>> = match settings.hc_profiles() {
+            None => vec![None],
+            Some((profiles, level)) => level
+                .into_iter()
+                .map(Some)
+                .chain([None])
+                .flat_map(|level| profiles.iter().map(move |&p| Some((p, level))))
+                .collect(),
+        };
+        let mut profile_level = None;
+        let mut accepted = false;
+        let mut last = None;
+        for attempt in attempts {
+            let output = output_type(subtype, &settings, attempt)?;
+            unsafe {
+                let _ = output.SetUINT32(&MF_MT_MAX_KEYFRAME_SPACING, settings.keyframe_interval_s.max(1) * settings.fps);
+            }
+            match unsafe { native.SetOutputType(0, &output, 0) } {
+                Ok(()) => {
+                    profile_level = attempt;
+                    accepted = true;
+                    break;
+                }
+                Err(e) => {
+                    trace_open(&name, "SetOutputType", &e);
+                    last = Some(e);
+                }
+            }
+        }
+        if !accepted {
+            return Err(last.map_or(EncodeError::Unsupported, EncodeError::from));
+        }
+        if let Some((profile, level)) = profile_level {
+            controls.push(("profile", profile as i32));
+            controls.push(("level", level.map_or(-1, |l| l as i32)));
         }
         unsafe {
-            let output = video_type(subtype, &settings)?;
-            let _ = output.SetUINT32(&MF_MT_MAX_KEYFRAME_SPACING, settings.keyframe_interval_s.max(1) * settings.fps);
-            native.SetOutputType(0, &output, 0).inspect_err(|e| trace_open(&name, "SetOutputType", e))?;
             native
                 .SetInputType(0, &video_type(MFVideoFormat_NV12, &settings)?, 0)
                 .inspect_err(|e| trace_open(&name, "SetInputType", e))?;
@@ -391,7 +478,18 @@ impl<'a> Encoder<'a> {
             inputs: 0,
             output: Vec::new(),
             draining: false,
+            profile_level,
         })
+    }
+    /// The output type's sequence header (Design HC: the parameter sets of
+    /// an H.264/HEVC MFT), when the MFT publishes one.
+    pub fn sequence_header(&self) -> Option<Vec<u8>> {
+        let native = self.native.as_ref()?;
+        let current = unsafe { native.GetOutputCurrentType(0) }.ok()?;
+        let size = unsafe { current.GetBlobSize(&MF_MT_MPEG_SEQUENCE_HEADER) }.ok()?;
+        let mut blob = vec![0; size as usize];
+        unsafe { current.GetBlob(&MF_MT_MPEG_SEQUENCE_HEADER, &mut blob, None) }.ok()?;
+        Some(blob)
     }
     pub fn name(&self) -> &str {
         &self.name
@@ -431,7 +529,7 @@ impl<'a> Encoder<'a> {
             {
                 Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => {
                     let subtype = self.settings.subtype()?;
-                    unsafe { native.SetOutputType(0, &video_type(subtype, &self.settings)?, 0)? };
+                    unsafe { native.SetOutputType(0, &output_type(subtype, &self.settings, self.profile_level)?, 0)? };
                     continue;
                 }
                 Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(()),
@@ -615,11 +713,15 @@ pub enum Backend {
     SoftwareVp9,
 }
 
-/// What this PC can encode (read-only enumeration; activation may still fail).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What this PC can encode (read-only enumeration for VP9/AV1, where
+/// activation may still fail; Design HC encoders only after `hc_hardware`'s
+/// start check, and only with their master on).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Availability {
     pub av1_hardware: Vec<String>,
     pub vp9_hardware: Vec<String>,
+    pub hevc_hardware: Vec<String>,
+    pub h264_hardware: Vec<String>,
     /// libaom version; always built in.
     pub av1_software: String,
     /// libvpx version; always built in.
@@ -629,18 +731,98 @@ pub fn availability() -> Result<Availability> {
     Ok(Availability {
         av1_hardware: inventory(3)?,
         vp9_hardware: inventory(2)?,
+        hevc_hardware: hc_hardware(5),
+        h264_hardware: hc_hardware(4),
         av1_software: super::encode_aom::version(),
         vp9_software: super::encode_vpx::version(),
     })
 }
 
+/// Design HC components this process found unusable (`no_idr`, `reorder`,
+/// an unsupported bitstream): never offered again until restart.
+static INELIGIBLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+pub fn mark_ineligible(name: &str) {
+    let mut list = INELIGIBLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !list.iter().any(|n| n == name) {
+        list.push(name.to_owned());
+    }
+}
+fn ineligible(name: &str) -> bool {
+    INELIGIBLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|n| n == name)
+}
+
+/// Design HC: the hardware encoder of `codec` (4 H.264, 5 HEVC) that this
+/// PC really starts, as a one-entry list; empty while the codec's master is
+/// off or nothing passes. Checked once per process on its own thread
+/// (`hc_check`); a component later marked ineligible drops out.
+pub fn hc_hardware(codec: u8) -> Vec<String> {
+    if !Switches::current().codec_on(codec) {
+        return Vec::new();
+    }
+    match hc_checked(codec) {
+        Some(Ok(name)) if !ineligible(name) => vec![name.clone()],
+        _ => Vec::new(),
+    }
+}
+/// The cached `hc_check` result (None: not an HC codec).
+pub fn hc_checked(codec: u8) -> Option<&'static std::result::Result<String, String>> {
+    static H264: OnceLock<std::result::Result<String, String>> = OnceLock::new();
+    static HEVC: OnceLock<std::result::Result<String, String>> = OnceLock::new();
+    let cell = match codec {
+        4 => &H264,
+        5 => &HEVC,
+        _ => return None,
+    };
+    Some(cell.get_or_init(|| std::thread::spawn(move || hc_check(codec)).join().unwrap_or_else(|_| Err("check panicked".into()))))
+}
+/// The start check behind `hc_hardware`: a hardware MFT opens at 426x240/15
+/// on a fresh device, and its pictures (the third forced) come out as access
+/// units the packetiser accepts and the receiver's gate passes, with at
+/// least two IDRs. Returns the encoder's name, or why it failed.
+pub fn hc_check(codec: u8) -> std::result::Result<String, String> {
+    let kind = Codec::of(codec).ok_or("not an HC codec")?;
+    let (gpu, _, _) = super::device(false, false).map_err(|e| format!("device {e}"))?;
+    let owner = DecodeDevice::new(&gpu).map_err(|e| format!("media foundation {e}"))?;
+    let settings = EncoderSettings { codec, width: 426, height: 240, fps: 15, bitrate_kbps: 200, keyframe_interval_s: 60 };
+    let mut encoder = Encoder::open(&owner, settings).map_err(|e| format!("open {e:?}"))?;
+    let name = encoder.name().to_owned();
+    let mut packetiser = Packetiser::new(kind);
+    if let Some(header) = encoder.sequence_header() {
+        packetiser.on_codec_config(&header);
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut units = Vec::new();
+    for i in 0..4u32 {
+        let picture = crate::generated::pattern_nv12(426, 240, i);
+        units.extend(encoder.encode(&picture, i64::from(i) * 66_667, i == 2, deadline).map_err(|e| format!("{name}: encode {e:?}"))?);
+        units.extend(encoder.wait_output(Instant::now() + Duration::from_millis(500)).map_err(|e| format!("{name}: output {e:?}"))?);
+    }
+    units.extend(encoder.finish(deadline).map_err(|e| format!("{name}: drain {e:?}"))?);
+    let mut gate = Gate::new(kind, 426, 240);
+    let (mut keys, mut pictures) = (0, 0);
+    for unit in &units {
+        let packet = match packetiser.on_access_unit(&unit.data, unit.pts_us) {
+            Ok(packet) => packet,
+            Err(super::annexb::PacketiseError::NoSlice) => continue,
+            Err(e) => return Err(format!("{name}: {}", e.label())),
+        };
+        gate.check(&packet.data, packet.key).map_err(|r| format!("{name}: {}", r.line(kind)))?;
+        keys += usize::from(packet.key);
+        pictures += 1;
+    }
+    if pictures < 3 || keys < 2 {
+        return Err(format!("{name}: {pictures} pictures, {keys} IDRs (a forced keyframe that is not an IDR?)"));
+    }
+    Ok(name)
+}
+
 /// BTV3 codec bits of a decode mask: bit 0 VP9, bit 1 AV1 (the offer's codec
-/// mask order: VP9 then AV1).
+/// mask order: VP9 then AV1). Design HC's bits: `codecs::HELLO_*`.
 pub const MASK_VP9: u8 = 1;
 pub const MASK_AV1: u8 = 2;
 /// Decode-mask bit 7 (CF-MEDIA-50): the peer prefers VP9; a sender that can
 /// encode VP9 sends VP9.
-pub const DECODE_PREFERS_VP9: u8 = 0x80;
+pub const DECODE_PREFERS_VP9: u8 = super::codecs::DECODE_PREFERS_VP9;
 
 /// Android's encoder order: hardware first, AV1 before VP9 when both exist,
 /// then the optimized software AV1 encoder; software VP9 (Windows only,

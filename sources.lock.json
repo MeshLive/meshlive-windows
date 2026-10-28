@@ -21,7 +21,10 @@
     "licenses/libaom-LICENSE.txt": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2",
     "licenses/libaom-PATENTS.txt": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61",
     "licenses/libvpx-LICENSE.txt": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615",
-    "licenses/libvpx-PATENTS.txt": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    "licenses/libvpx-PATENTS.txt": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+    "licenses/dav1d-COPYING.txt": "dd92c3c2247c5651606fc23a5e2d6a1ebc5ace9a3e49cbde0e12f05ad1cb1ee5",
+    "tests/fixtures/dav1d-bench-854x480.ivf": "749917b4dc9c861369c01f111034aea49981ae4734156a8db6f47306c7f09fc7",
+    "tests/fixtures/dav1d-bench-640x360.ivf": "3cf1de0e3512cbfcd93ba91ffa473e7ba7ea25866080d7932d1a077947d8d24a"
   },
   "native_audio": {
     "version": "1.5.2",
@@ -51,6 +54,20 @@
       "url": "https://sourceforge.net/projects/ezwinports/files/make-4.4.1-without-guile-w32-bin.zip/download",
       "sha256": "fb66a02b530f7466f6222ce53c0b602c5288e601547a034e4156a512dd895ee7",
       "license": "GPL-3.0-or-later; build-only (ezwinports binary of GNU make)"
+    },
+    "meson": {
+      "version": "1.9.1",
+      "filename": "meson-1.9.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-1.9.1-py3-none-any.whl",
+      "sha256": "f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0",
+      "license": "Apache-2.0; build-only (pure-Python wheel, run from the cache, never installed)"
+    },
+    "ninja": {
+      "version": "1.13.0",
+      "filename": "ninja-1.13.0-py3-none-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/29/45/c0adfbfb0b5895aa18cec400c535b4f7ff3e52536e0403602fc1a23f7de9/ninja-1.13.0-py3-none-win_amd64.whl",
+      "sha256": "fb8ee8719f8af47fed145cced4a85f0755dd55d45b2bddaf7431fa89803c5f3e",
+      "license": "Apache-2.0; build-only (ninja.exe from the wheel, run from the cache, never installed)"
     }
   },
   "native_video": {
@@ -69,6 +86,16 @@
       "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webm/libvpx-1.17.0.tar.gz",
       "sha256": "7f98aae5c52c46e85b7b26feabcab9b1554605e771bd1df1d6e6a00ee22fa8ed",
       "license": "BSD-3-Clause plus the WebM additional IP rights grant (PATENTS)"
+    },
+    "dav1d": {
+      "version": "1.5.3",
+      "tag": "1.5.3",
+      "tag_object": "0664c109d1b85503bc32bf89920f951cacf5702e",
+      "commit": "b546257f770768b2c88258c533da38b91a06f737",
+      "filename": "dav1d-1.5.3.tar.xz",
+      "url": "https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.xz",
+      "sha256": "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011",
+      "license": "BSD-2-Clause; AV1 is covered by the AOMedia Patent License 1.0"
     }
   }
 }

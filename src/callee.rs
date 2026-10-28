@@ -57,7 +57,7 @@ pub fn node_id() -> Option<[u8; 16]> {
 pub fn own_offer(state: &presence::State, epoch: u32) -> Option<OwnOffer> {
     let rdi = presence::own_rdi(&state.keys, &node_id()?, epoch, rotating::ROLE_CALL_OFFER)?;
     let caps = incoming::CAPABILITIES;
-    let payload = pc_announcement::CallOffer { rdi, relay: false, consent: false, codecs: caps.encode_codecs & caps.decode_codecs & 7, cost: 0 }
+    let payload = pc_announcement::CallOffer { rdi, relay: false, consent: false, codecs: pc_announcement::call_offer_codecs(caps.encode_codecs & caps.decode_codecs), cost: 0 }
         .encode()
         .ok()?;
     let extra = test_pc_kind().and_then(|kind| test_pc_payload(state, epoch, kind));
@@ -317,9 +317,15 @@ impl Listening {
             return Err((None, ANNOUNCED_ELSEWHERE.to_owned()));
         };
         let cancelled = Arc::new(AtomicBool::new(false));
+        // Each step is traced before it runs: the radio worker once stopped
+        // inside this function with no later trace (PC -> A15s test,
+        // 2026-10-28), so the next occurrence must name the blocking step.
+        trace("announce_step", "create_service");
         let mut peripheral = Peripheral::create_pc(offer.payload, cancelled.clone()).map_err(|e| (Some(e), user_text(&e)))?;
         peripheral.set_form(main_form(offer));
+        trace("announce_step", "start_advertising");
         let started = peripheral.start();
+        trace("announce_step", &format!("started ok={}", started.is_ok()));
         Self::trace_events(&peripheral, trace);
         started.map_err(|e| (Some(e), user_text(&e)))?;
         let (data, announcement) = peripheral.last_advertisement_status();
@@ -710,6 +716,9 @@ pub fn answer_with_identity(
     };
     trace("incoming_invite", &format!("call_id={} ms={}", hex(&invite.call_id), started.elapsed().as_millis()));
     let (header, video_plan) = crate::call_video::header_for(answered.peer_decode_codecs, &dial::encoders());
+    trace("video_plan", &format!("codec={} encoders={} peer_decode={:#04x} peer_encode={:#04x}", header.codec, video_plan.len(),
+        answered.peer_decode_codecs, answered.peer_capabilities.encode_codecs));
+    trace("encoder_choice", &crate::call_video::choice_line(answered.peer_decode_codecs, &dial::encoders()));
     let blocked = screen((!answered.peer_pseudonymous).then_some(answered.peer_fingerprint));
     let busy = !blocked && search.is_some_and(|s| s.busy_for((!answered.peer_pseudonymous).then_some(answered.peer_node)));
     let mut session = if busy {

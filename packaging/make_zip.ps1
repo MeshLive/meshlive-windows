@@ -25,7 +25,7 @@ foreach ($doc in 'docs\user-guide.md', 'docs\privacy.md', 'LICENSE', 'THIRD_PART
     if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $stage }
 }
 # The bundled fonts' licences (SIL OFL 1.1) travel with the exe that embeds them.
-foreach ($font in @(@('assets\fonts\OFL.txt', 'OFL-NotoSans.txt'), @('assets\fonts\Manrope-OFL.txt', 'OFL-Manrope.txt'), @('licenses\Apache-2.0.txt', 'Apache-2.0.txt'))) {
+foreach ($font in @(@('assets\fonts\OFL.txt', 'OFL-NotoSans.txt'), @('assets\fonts\Manrope-OFL.txt', 'OFL-Manrope.txt'), @('licenses\Apache-2.0.txt', 'Apache-2.0.txt'), @('licenses\dav1d-COPYING.txt', 'dav1d-COPYING.txt'))) {
     Copy-Item -LiteralPath (Join-Path $repo $font[0]) -Destination (Join-Path $stage $font[1])
 }
 $zip = Join-Path $out "MeshLive-$version-windows-x64.zip"

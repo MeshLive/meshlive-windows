@@ -1,6 +1,7 @@
 //! Single-owner decoder format decisions from Android DecoderFormatTracker.
 //! Call after source/packet admission, before enqueueing. A plan is not codec
 //! admission: native input still needs SizeGuard and all session security gates.
+use super::annexb::{Codec, Gate, ParameterSets, Rejected};
 use super::bitstream::key_size;
 use crate::media::{
     CONFIG, DISCARDABLE, DISCONTINUITY, KEY_FRAME, MAX_PAYLOAD, Packet, VideoHeader,
@@ -18,6 +19,10 @@ pub enum FormatError {
     Kind,
     Budget,
     Size,
+    /// Design HC: a codec-configuration or discardable packet on codec 4 or
+    /// 5, or three rejected keyframes in a row within 10 s: the session closes
+    /// as an unsupported stream.
+    Unsupported,
 }
 impl std::fmt::Display for FormatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -49,11 +54,19 @@ pub struct PacketPlan {
     pub queue: bool,
     pub reset_queue: bool,
     pub rebuild: Option<Rebuild>,
+    /// Design HC: the access unit to queue instead of the packet's payload
+    /// (SEI, AUD and filler removed).
+    pub payload: Option<Vec<u8>>,
+    /// Design HC: the access unit failed the gate and is dropped.
+    pub rejected: Option<Rejected>,
 }
 struct State {
     header: VideoHeader,
     current: Arc<VideoFormat>,
     since_key: Vec<Arc<[u8]>>,
+    /// Design HC (codecs 4 and 5): the access-unit gate, which owns the
+    /// active parameter sets. Its first accepted IDR supplies the format.
+    gate: Option<Gate>,
 }
 pub struct FormatTracker {
     state: Option<State>,
@@ -67,6 +80,18 @@ impl FormatTracker {
         first_key: Option<&[u8]>,
     ) -> Result<Self> {
         header.encode().map_err(|_| FormatError::Header)?;
+        if let Some(codec) = Codec::of(header.codec) {
+            // No configuration packets exist for codecs 4 and 5; the size and
+            // sets come from the first IDR that passes the gate (`plan`).
+            return Ok(Self {
+                state: Some(State {
+                    header,
+                    current: Arc::new(VideoFormat { width: header.width, height: header.height, configurations: Vec::new() }),
+                    since_key: Vec::new(),
+                    gate: Some(Gate::new(codec, header.width.into(), header.height.into())),
+                }),
+            });
+        }
         if configurations.len() > MAX_CONFIGURATIONS
             || configurations.iter().any(|p| p.len() > MAX_PAYLOAD)
             || first_key.is_some_and(|p| p.len() > MAX_PAYLOAD)
@@ -100,8 +125,13 @@ impl FormatTracker {
                     configurations: selected,
                 }),
                 since_key: Vec::new(),
+                gate: None,
             }),
         })
+    }
+    /// Design HC: the gate's active parameter sets.
+    pub fn active_sets(&self) -> Option<&ParameterSets> {
+        self.state.as_ref()?.gate.as_ref()?.active().map(|a| &**a)
     }
     pub fn current(&self) -> Result<&VideoFormat> {
         Ok(&self.state.as_ref().ok_or(FormatError::Closed)?.current)
@@ -130,6 +160,23 @@ impl State {
         if packet.payload.len() > MAX_PAYLOAD {
             return Err(FormatError::Budget);
         }
+        if let Some(gate) = self.gate.as_mut() {
+            if packet.flags & (CONFIG | DISCARDABLE) != 0 {
+                return Err(FormatError::Unsupported);
+            }
+            let accepted = match gate.check(packet.payload, packet.flags & KEY_FRAME != 0) {
+                Ok(accepted) => accepted,
+                Err(rejected) => {
+                    return Ok(PacketPlan { queue: false, reset_queue: false, rebuild: None, payload: None, rejected: Some(rejected) });
+                }
+            };
+            let rebuild = match &accepted.activated {
+                Some(sets) => self.activate(sets)?,
+                None => None,
+            };
+            let reset_queue = (accepted.key && packet.flags & DISCONTINUITY != 0) || rebuild.is_some();
+            return Ok(PacketPlan { queue: true, reset_queue, rebuild, payload: Some(accepted.unit), rejected: None });
+        }
         if packet.flags & CONFIG != 0 {
             let existing = self
                 .current
@@ -151,6 +198,8 @@ impl State {
                 queue,
                 reset_queue: false,
                 rebuild: None,
+                payload: None,
+                rejected: None,
             });
         }
         let key = packet.flags & KEY_FRAME != 0;
@@ -160,7 +209,21 @@ impl State {
             queue: true,
             reset_queue,
             rebuild,
+            payload: None,
+            rejected: None,
         })
+    }
+    /// Design HC: newly active parameter sets (an IDR that passed the gate)
+    /// become the format; the decoder is rebuilt before that IDR.
+    fn activate(&mut self, sets: &ParameterSets) -> Result<Option<Rebuild>> {
+        let (width, height) = checked_size(self.header, (sets.width, sets.height))?;
+        let configuration_changed = self.current.configurations.first().is_none_or(|c| c[..] != sets.annex_b[..]);
+        let size_changed = (width, height) != (self.current.width, self.current.height);
+        if !configuration_changed && !size_changed {
+            return Ok(None);
+        }
+        self.current = Arc::new(VideoFormat { width, height, configurations: vec![Arc::from(&sets.annex_b[..])] });
+        Ok(Some(Rebuild { format: self.current.clone(), size_changed, configuration_changed }))
     }
     fn key(&mut self, payload: &[u8]) -> Result<Option<Rebuild>> {
         let held = std::mem::take(&mut self.since_key);

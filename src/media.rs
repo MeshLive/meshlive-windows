@@ -37,13 +37,25 @@ pub struct VideoHeader {
     pub width: u16,
     pub height: u16,
     pub fps: u8,
-    /// 2 = VP9, 3 = AV1.
+    /// 2 = VP9, 3 = AV1; Design HC 4 = H.264, 5 = HEVC.
     pub codec: u8,
     pub quarter_turns: u8,
     pub opus: bool,
 }
 impl VideoHeader {
+    /// A received header. Design HC codecs 4 and 5 are accepted only with
+    /// their master on (otherwise they fail closed as an unsupported codec).
     pub fn decode(raw: &[u8]) -> Result<Self, Error> {
+        Self::decode_with(raw, crate::video::codecs::Switches::current())
+    }
+    pub fn decode_with(raw: &[u8], switches: crate::video::codecs::Switches) -> Result<Self, Error> {
+        let value = Self::decode_any(raw)?;
+        if !switches.codec_on(value.codec) {
+            return Err(Error::Header);
+        }
+        Ok(value)
+    }
+    fn decode_any(raw: &[u8]) -> Result<Self, Error> {
         if raw.len() != 15 || &raw[..4] != b"BTV3" {
             return Err(Error::Header);
         }
@@ -65,7 +77,7 @@ impl VideoHeader {
         if !(1..=4096).contains(&self.width)
             || !(1..=4096).contains(&self.height)
             || !(1..=120).contains(&self.fps)
-            || !matches!(self.codec, 2 | 3)
+            || !matches!(self.codec, 2..=5)
             || self.quarter_turns > 3
         {
             return Err(Error::Header);
@@ -288,6 +300,21 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 6);
+    }
+    #[test]
+    fn hevc_and_h264_headers_need_their_masters() {
+        use crate::video::codecs::Switches;
+        for codec in [4, 5] {
+            let raw = VideoHeader { width: 640, height: 480, fps: 15, codec, quarter_turns: 0, opus: true }.encode().unwrap();
+            assert_eq!(VideoHeader::decode_with(&raw, Switches::LEGACY), Err(Error::Header));
+            let on = Switches { hevc: codec == 5, h264: codec == 4, ..Switches::LEGACY };
+            assert_eq!(VideoHeader::decode_with(&raw, on).unwrap().codec, codec);
+            let other = Switches { hevc: codec == 4, h264: codec == 5, ..Switches::LEGACY };
+            assert_eq!(VideoHeader::decode_with(&raw, other), Err(Error::Header));
+        }
+        let mut raw = VideoHeader { width: 640, height: 480, fps: 15, codec: 2, quarter_turns: 0, opus: true }.encode().unwrap();
+        raw[9] = 6;
+        assert!(VideoHeader::decode_with(&raw, Switches { hevc: true, h264: true, ..Switches::LEGACY }).is_err());
     }
     #[test]
     fn header_fields_and_packet_size_are_bounded() {

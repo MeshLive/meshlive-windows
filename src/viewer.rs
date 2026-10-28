@@ -8,9 +8,12 @@
 //! render time from the clock; the display path presents them without copies
 //! (the GPU texture path is `video::surface`).
 use crate::{
-    media::{self, AUDIO, CONFIG, KEY_FRAME, VideoHeader},
+    media::{self, AUDIO, CONFIG, DISCARDABLE, KEY_FRAME, VideoHeader},
     playout::Clock,
-    video::{FormatError, FormatTracker, VideoFormat},
+    video::{
+        FormatError, FormatTracker, VideoFormat,
+        annexb::{Codec, KeyframeRejections, Rejected},
+    },
 };
 use std::{collections::VecDeque, sync::Arc};
 
@@ -71,7 +74,14 @@ pub struct VideoReceiver {
     waiting_key: bool,
     /// CF-MEDIA-66: late video may grow the shared clock only this far.
     growth_limit_ms: Option<i64>,
+    /// Design HC: rejected keyframes in a row (three within 10 s close).
+    rejections: KeyframeRejections,
+    /// Design HC: `au_reject` / `au_unusual` lines for the owner's log.
+    au_log: Vec<String>,
+    pub au_rejected: u64,
 }
+/// At most this many access-unit log lines wait for the owner.
+const MAX_AU_LOG: usize = 16;
 
 /// A decoder that accepts everything and reports each input as one frame:
 /// for an owner that does not show the peer's video (no surface yet), so the
@@ -113,6 +123,42 @@ impl VideoReceiver {
             skipped: 0,
             waiting_key: false,
             growth_limit_ms: None,
+            rejections: KeyframeRejections::default(),
+            au_log: Vec::new(),
+            au_rejected: 0,
+        }
+    }
+    /// Design HC: the `au_reject` / `au_unusual` lines since the last call.
+    pub fn take_au_log(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.au_log)
+    }
+    fn log(&mut self, line: String) {
+        if self.au_log.len() < MAX_AU_LOG {
+            self.au_log.push(line);
+        }
+    }
+    /// Design HC: a rejected access unit is dropped as corrupt video (wait
+    /// for the next keyframe, which the owner requests); three rejected
+    /// keyframes in a row within 10 s close the session.
+    fn rejected(&mut self, codec: Codec, rejected: Rejected, now_ns: i64) -> Result<(), Error> {
+        self.skipped += 1;
+        self.au_rejected += 1;
+        self.waiting_key = true;
+        self.log(rejected.line(codec));
+        if rejected.key && self.rejections.rejected(now_ns) {
+            return Err(Error::Format(FormatError::Unsupported));
+        }
+        Ok(())
+    }
+    fn accepted(&mut self, codec: Codec, key: bool, rebuild: Option<&crate::video::Rebuild>) {
+        if key {
+            self.rejections.accepted_keyframe();
+        }
+        if rebuild.is_some() {
+            let unusual = self.tracker.as_ref().and_then(|t| t.active_sets()).map(|s| s.unusual.clone()).unwrap_or_default();
+            for (field, value) in unusual {
+                self.log(format!("au_unusual: codec={} | field={field} | value={value}", codec.label()));
+            }
         }
     }
     /// The queue overflowed (the owner is not keeping up): queued input is
@@ -153,10 +199,18 @@ impl VideoReceiver {
         self.frames
     }
     fn push_input(&mut self, packet: &media::Packet<'_>) {
+        self.push_unit(packet, None);
+    }
+    /// `unit`: Design HC's gated access unit in place of the packet's payload.
+    fn push_unit(&mut self, packet: &media::Packet<'_>, unit: Option<Vec<u8>>) {
+        let payload: Arc<[u8]> = match unit {
+            Some(unit) => unit.into(),
+            None => Arc::from(packet.payload),
+        };
         self.frames += 1;
-        self.bytes += packet.payload.len();
+        self.bytes += payload.len();
         self.queue.push_back(Step::Input {
-            payload: Arc::from(packet.payload),
+            payload,
             pts_us: packet.pts_us,
             key: packet.flags & KEY_FRAME != 0,
             config: packet.flags & CONFIG != 0,
@@ -202,9 +256,36 @@ impl VideoReceiver {
             return Err(Error::Full);
         }
         let config = packet.flags & CONFIG != 0;
+        let hc = Codec::of(self.header.codec);
+        // Design HC: no configuration packet and no discardable picture exist
+        // for codecs 4 and 5; either closes the session as unsupported.
+        if hc.is_some() && packet.flags & (CONFIG | DISCARDABLE) != 0 {
+            return Err(Error::Format(FormatError::Unsupported));
+        }
         if !config {
             // Configuration is untimed; only media anchors and grows the shared clock.
             clock.timing_limited(packet.pts_us, now_ns, self.growth_limit_ms);
+        }
+        if let (Some(codec), None) = (hc, self.tracker.as_ref()) {
+            if packet.flags & KEY_FRAME == 0 {
+                self.skipped += 1;
+                return Ok(());
+            }
+            let mut tracker = FormatTracker::new(self.header, &[], None).map_err(Error::Format)?;
+            let plan = tracker.plan(packet).map_err(Error::Format)?;
+            if let Some(rejected) = plan.rejected {
+                return self.rejected(codec, rejected, now_ns);
+            }
+            self.tracker = Some(tracker);
+            self.waiting_key = false;
+            self.accepted(codec, true, plan.rebuild.as_ref());
+            let format = match plan.rebuild {
+                Some(rebuild) => rebuild.format,
+                None => self.tracker.as_ref().unwrap().recovery().map_err(Error::Format)?,
+            };
+            self.push_configure(format);
+            self.push_unit(&packet, plan.payload);
+            return Ok(());
         }
         let Some(tracker) = self.tracker.as_mut() else {
             if config {
@@ -238,6 +319,12 @@ impl VideoReceiver {
             self.waiting_key = false;
         }
         let plan = tracker.plan(packet).map_err(Error::Format)?;
+        if let (Some(codec), Some(rejected)) = (hc, plan.rejected) {
+            return self.rejected(codec, rejected, now_ns);
+        }
+        if let Some(codec) = hc {
+            self.accepted(codec, packet.flags & KEY_FRAME != 0, plan.rebuild.as_ref());
+        }
         if plan.reset_queue {
             self.reset_queue();
         }
@@ -245,7 +332,7 @@ impl VideoReceiver {
             self.push_configure(rebuild.format);
         }
         if plan.queue {
-            self.push_input(&packet);
+            self.push_unit(&packet, plan.payload);
         }
         Ok(())
     }

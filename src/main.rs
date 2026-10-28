@@ -7,6 +7,8 @@ mod startup;
 mod tray;
 mod notify;
 mod graphics;
+#[cfg(test)]
+mod screenshots;
 mod radio_backend;
 mod stream_backend;
 mod source_backend;

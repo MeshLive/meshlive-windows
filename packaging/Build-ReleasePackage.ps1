@@ -52,7 +52,7 @@ foreach ($doc in 'THIRD_PARTY_NOTICES.md', 'LICENSE') {
     if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $layout }
 }
 # The bundled fonts' licences (SIL OFL 1.1) travel with the exe that embeds them.
-foreach ($font in @(@('assets\fonts\OFL.txt', 'OFL-NotoSans.txt'), @('assets\fonts\Manrope-OFL.txt', 'OFL-Manrope.txt'), @('licenses\Apache-2.0.txt', 'Apache-2.0.txt'))) {
+foreach ($font in @(@('assets\fonts\OFL.txt', 'OFL-NotoSans.txt'), @('assets\fonts\Manrope-OFL.txt', 'OFL-Manrope.txt'), @('licenses\Apache-2.0.txt', 'Apache-2.0.txt'), @('licenses\dav1d-COPYING.txt', 'dav1d-COPYING.txt'))) {
     Copy-Item -LiteralPath (Join-Path $repo $font[0]) -Destination (Join-Path $layout $font[1])
 }
 & python -B (Join-Path $PSScriptRoot 'make_assets.py') (Join-Path $repo 'assets\icon.png') (Join-Path $layout 'Assets')

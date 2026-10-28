@@ -707,6 +707,7 @@ fn a_video_call_sends_an_encoded_test_pattern_keyframe_first() {
         vp9_hardware: Vec::new(),
         av1_software: crate::video::aom_version(),
         vp9_software: crate::video::vpx_version(),
+        ..Availability::default()
     };
     let (header, plan) = header_for(MASK_AV1, &available);
     assert_eq!(plan, vec![(3, Backend::SoftwareAv1)]);

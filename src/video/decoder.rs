@@ -1,5 +1,14 @@
 //! Synchronous D3D11-aware MFTs only. Access units must already be admitted and
 //! authenticated; this worker does not replace source/record/session policy.
+//!
+//! Design HC: H.264 uses Windows' built-in decoder MFT and HEVC Microsoft's
+//! HEVC Video Extensions (a Store package, "HEVCVideoExtension"). Measured on
+//! this repo's laptop (2026-10-28): both enumerate with the ordinary
+//! SYNCMFT flag, are synchronous and D3D11-aware, so no Store or async path
+//! is needed. `MFT_ENUM_FLAG_UNTRUSTED_STOREMFT` is deliberately not used: it
+//! would load untrusted third-party Store decoders into this process. Every
+//! H.264/HEVC access unit passes the `annexb::Gate` again here.
+use super::annexb::{Codec, Gate};
 use super::bitstream::SizeGuard;
 use super::*;
 use crate::media::{MAX_PAYLOAD, VideoHeader};
@@ -61,6 +70,12 @@ pub struct DecodedFrame<'a> {
     pub format: OutputFormat,
     pub timestamp_100ns: i64,
 }
+impl<'a> DecodedFrame<'a> {
+    /// A picture that is not from an MFT (the dav1d fallback's NV12 pool).
+    pub(super) fn new(sample: IMFSample, owner: &'a DecodeDevice, format: OutputFormat, timestamp_100ns: i64) -> Self {
+        Self { sample, owner, format, timestamp_100ns }
+    }
+}
 impl DecodedFrame<'_> {
     pub fn nv12(&self) -> Result<Nv12Frame<'_>> {
         self.owner.nv12_frame(self.sample.clone(), self.format.crop)
@@ -109,14 +124,18 @@ pub struct Decoder<'a> {
     ending: bool,
     controls: CodecControls,
     sizes: SizeGuard,
+    /// Design HC: the access-unit gate (codecs 4 and 5) in place of `sizes`.
+    hc: Option<Gate>,
 }
 impl<'a> Decoder<'a> {
     pub fn open(owner: &'a DecodeDevice, header: VideoHeader) -> DecodeResult<Self> {
         header.encode().map_err(|_| DecodeError::Header)?;
-        let subtype = if header.codec == 2 {
-            MFVideoFormat_VP90
-        } else {
-            MFVideoFormat_AV1
+        let subtype = match header.codec {
+            2 => MFVideoFormat_VP90,
+            3 => MFVideoFormat_AV1,
+            4 => MFVideoFormat_H264,
+            5 => MFVideoFormat_HEVC,
+            _ => return Err(DecodeError::Header),
         };
         let mut last = DecodeError::Unsupported;
         // Hardware-category MFTs first. Async candidates are explicitly refused
@@ -183,6 +202,7 @@ impl<'a> Decoder<'a> {
             ending: false,
             controls,
             sizes: SizeGuard::new(header),
+            hc: hc_gate(header),
         };
         decoder.negotiate()?;
         let native = &decoder.inner.as_ref().unwrap().native;
@@ -244,10 +264,14 @@ impl<'a> Decoder<'a> {
         let sample = input_sample(payload, pts_us, key_frame, self.header.fps)?;
         // Preflight every picture before the opaque decoder sees its bytes.
         // Backpressure must not commit speculative reference/sequence state.
-        let sizes = self
-            .sizes
-            .inspect(payload)
-            .map_err(DecodeError::Bitstream)?;
+        let mut hc = self.hc.clone();
+        let sizes = match hc.as_mut() {
+            Some(gate) => {
+                gate.check(payload, key_frame).map_err(|_| DecodeError::Bitstream(BitstreamError::Malformed))?;
+                self.sizes
+            }
+            None => self.sizes.inspect(payload).map_err(DecodeError::Bitstream)?,
+        };
         match unsafe {
             self.inner
                 .as_ref()
@@ -257,6 +281,7 @@ impl<'a> Decoder<'a> {
         } {
             Ok(()) => {
                 self.sizes = sizes;
+                self.hc = hc;
                 self.accepting = false;
                 Ok(true)
             }
@@ -349,8 +374,12 @@ impl<'a> Decoder<'a> {
         self.ending = false;
         self.accepting = true;
         self.sizes = SizeGuard::new(self.header);
+        self.hc = hc_gate(self.header);
         Ok(())
     }
+}
+fn hc_gate(header: VideoHeader) -> Option<Gate> {
+    Codec::of(header.codec).map(|codec| Gate::new(codec, header.width.into(), header.height.into()))
 }
 
 fn input_type(header: VideoHeader, subtype: GUID) -> DecodeResult<IMFMediaType> {

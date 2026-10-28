@@ -85,4 +85,17 @@ fn main() {
     // Unbundled: bundling libvpx into the rlib lost its members at the final link.
     println!("cargo:rustc-link-lib=static:-bundle=meshlive_vpx");
     println!("cargo:rustc-link-lib=static:-bundle=vpx");
+    // Pinned static dav1d (software AV1 decoder fallback, Design AD) and its C boundary.
+    println!("cargo:rerun-if-env-changed=MESH_DAV1D_LIB");
+    println!("cargo:rerun-if-changed=src/video/decode_dav1d_shim.c");
+    let directory = std::env::var("MESH_DAV1D_LIB")
+        .expect("Use scripts/Build.ps1 to verify and build the pinned native video decoder first");
+    for name in ["dav1d.lib", "meshlive_dav1d.lib"] {
+        let library = std::path::Path::new(&directory).join(name);
+        assert!(library.is_file(), "Pinned static dav1d/shim library is missing");
+        println!("cargo:rerun-if-changed={}", library.display());
+    }
+    println!("cargo:rustc-link-search=native={directory}");
+    println!("cargo:rustc-link-lib=static:-bundle=meshlive_dav1d");
+    println!("cargo:rustc-link-lib=static:-bundle=dav1d");
 }

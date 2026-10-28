@@ -34,6 +34,11 @@ try {
         if ($code -ne 0) { throw 'Pinned native video encoder build failed.' }
         $env:MESH_AOM_LIB = Join-Path $repo ".artifacts/native/$Target/aom"
         $env:MESH_VPX_LIB = Join-Path $repo ".artifacts/native/$Target/vpx"
+        $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        & python -B scripts/native_decoder.py --target $Target 2>&1 | ForEach-Object { "$_" }; $code = $LASTEXITCODE
+        $ErrorActionPreference = $saved
+        if ($code -ne 0) { throw 'Pinned native video decoder build failed.' }
+        $env:MESH_DAV1D_LIB = Join-Path $repo ".artifacts/native/$Target/dav1d"
         $arguments = @('build','--locked','--target',$Target,'--jobs','1')
         if ($Action -eq 'Check') { $arguments[0] = 'check' }
         if ($Configuration -eq 'Release') {

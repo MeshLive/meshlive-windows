@@ -135,7 +135,15 @@ fn opt_in_native_stream_phone_check() {
         let initial = meshlive::stream_source::InitialMedia { muted: true, ..Default::default() };
         if mode == "source-camera" { assert_eq!(std::env::var("MESHLIVE_PHONE_CAMERA_CONSENT").as_deref(), Ok("1"), "Explicit camera check required"); }
         let kind = if matches!(mode.as_str(), "source-video" | "source-camera") { LiveKind::Video } else { LiveKind::AudioOnly };
-        let task = crate::source_backend::Task::start(dir.clone(), kind, String::new(), Default::default(), initial, out);
+        // Design HC: MESHLIVE_PHONE_SOURCE_CODEC=2|3|4|5 picks the source codec
+        // (default VP9, as before); 4/5 need their master switch on.
+        let mut settings = meshlive::stream_source::Settings::default();
+        if let Ok(codec) = std::env::var("MESHLIVE_PHONE_SOURCE_CODEC") {
+            settings.codec = codec.parse().expect("MESHLIVE_PHONE_SOURCE_CODEC is 2, 3, 4 or 5");
+            assert!(settings.valid(), "codec {} isn't valid here (HEVC/H.264 are off with MESHLIVE_HEVC=0 / MESHLIVE_H264=0, or this PC has no hardware encoder for them)", settings.codec);
+        }
+        eprintln!("PHONE_CHECK source_codec={}", settings.codec);
+        let task = crate::source_backend::Task::start(dir.clone(), kind, String::new(), settings, initial, out);
         (None, Some(task))
     };
     let started = Instant::now(); let mut last_report = started;

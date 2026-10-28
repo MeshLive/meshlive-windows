@@ -1,5 +1,6 @@
 //! Design QV rev 4: stream admission, request bytes and hop-local reports.
 //! All radio activation remains an explicit worker operation.
+use crate::video::codecs;
 use crate::{
     bmh2::{self, Capabilities, Hello, Pending, Purpose, Role, SigningIdentity},
     bluetooth::{advertise, scan::Sighting},
@@ -90,10 +91,15 @@ impl Target {
 /// R7): joining it means advertising this PC's fixed ID to everyone nearby,
 /// so the phone has to use Android's "Private Bluetooth ID" (rotating IDs).
 pub const NEEDS_PRIVATE_ID: &str = "Ask them to turn on Private Bluetooth ID";
+/// Design HC (the cost of its stream order): an HEVC stream on a PC without Microsoft's
+/// HEVC Video Extensions (or with the HEVC master off).
+pub const NEEDS_HEVC: &str = "This PC can't decode HEVC: it needs Microsoft's HEVC Video Extensions";
 pub fn unavailable(a: &Announcement, decode_mask: u8) -> Option<&'static str> {
     if a.version != 5 { Some(NEEDS_PRIVATE_ID) }
     else if !a.is_gatt() { Some("Not reachable from this PC") }
-    else if a.summary != 0x40 && a.summary & decode_mask & 7 == 0 { Some("This PC can't decode this stream") }
+    else if a.summary != 0x40 && codecs::summary_to_hello(a.summary) & decode_mask & codecs::HELLO_CODECS == 0 {
+        Some(if a.summary & codecs::SUMMARY_HEVC != 0 && decode_mask & codecs::HELLO_HEVC == 0 { NEEDS_HEVC } else { "This PC can't decode this stream" })
+    }
     else { None }
 }
 
@@ -233,7 +239,10 @@ pub fn join<C: Carrier, I: SigningIdentity>(
         None => Reader::direct(hop_in, content, source, audio, true),
     };
     let uplink = ViewerUplink::continue_link(hop_out, Sealer::new(Layer::Endpoint, endpoint.send_key(), Policy::default()).map_err(debug)?);
-    let codec_mask = decode_mask & offer.summary & if offer.cost == 0 { endpoint.peer().capabilities.encode_codecs } else { 7 };
+    // Hello bits throughout: the summary is mapped through the one table (a
+    // relayed offer has no source hello to intersect with).
+    let codec_mask = decode_mask & codecs::summary_to_hello(offer.summary)
+        & if offer.cost == 0 { endpoint.peer().capabilities.encode_codecs } else { codecs::HELLO_CODECS };
     Ok(Joined { reader, uplink, buffer, source, parent: link.peer().node_id, recovery_key, codec_mask, labels })
 }
 

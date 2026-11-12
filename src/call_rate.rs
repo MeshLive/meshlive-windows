@@ -109,6 +109,8 @@ pub struct DeliveryEstimate {
     minimum: VecDeque<(u64, i64)>,
     delivered_kbps: Option<u32>,
     queue_ms: Option<i32>,
+    /// Delivery reports seen from the peer (every one, a reset too).
+    reports: u64,
 }
 
 impl DeliveryEstimate {
@@ -126,6 +128,7 @@ impl DeliveryEstimate {
         self.queue_ms = None;
     }
     pub fn on_report(&mut self, received_bytes: u32, clock_ms: u32, now_ns: u64) {
+        self.reports += 1;
         match self.last_raw {
             Some((bytes, clock)) if received_bytes < bytes || clock_ms < clock => {
                 // A peer reset: never read as a wrap.
@@ -208,6 +211,101 @@ impl DeliveryEstimate {
     }
     pub fn written(&self) -> u64 {
         self.written
+    }
+    /// The peer's received bytes (its unwrapped v3 counter; 0 after a reset).
+    pub fn received(&self) -> u64 {
+        self.received
+    }
+    /// Delivery reports seen from the peer.
+    pub fn reports(&self) -> u64 {
+        self.reports
+    }
+}
+
+/// How long the peer's received count may stay still, while its delivery
+/// reports keep arriving and this side keeps writing, before the call says
+/// the peer stopped receiving. Android hangs up after about 8 s of silence.
+pub const PEER_RX_STALL_MS: u64 = 5_000;
+/// Media bytes written since the count last moved: a muted microphone's
+/// keep-alives alone never read as a stall.
+pub const PEER_RX_STALL_BYTES: u64 = 4_096;
+/// Reports that must arrive while the count stays still: the reverse
+/// direction works, so the silence is in this side's direction.
+pub const PEER_RX_STALL_REPORTS: u64 = 2;
+/// How often a call traces its send counters.
+pub const TX_LINE_MS: u64 = 10_000;
+
+/// What the send side of a call is doing, from this side's written bytes and
+/// the peer's delivery reports. The Windows -> Samsung stall of 2026-11: the
+/// phone's Bluetooth stack gave up its link layer for this PC's writes after
+/// this PC's Windows Bluetooth stack left one of its requests unanswered for
+/// 30 s; every write still succeeded here, and the phone kept reporting with
+/// a received count that no longer moved. Pure: fed once per worker tick.
+#[derive(Debug, Default)]
+pub struct TxWatch {
+    /// The peer's last received count, and (when it last moved, written
+    /// bytes then, reports then).
+    received: u64,
+    moved: Option<(u64, u64, u64)>,
+    /// When the current stall was declared.
+    stalled_at: Option<u64>,
+    /// A stall was declared at least once in this call.
+    ever_stalled: bool,
+    next_line_ns: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxEvent {
+    /// The peer stopped counting received bytes while it keeps reporting.
+    Stalled { quiet_ms: u64, written_since: u64, reports_since: u64 },
+    /// The peer counts again after a stall.
+    Resumed { stalled_ms: u64 },
+}
+
+impl TxWatch {
+    /// One tick: `written` and `received` are cumulative bytes, `reports` the
+    /// peer's delivery reports so far. Watching starts at the first report.
+    pub fn tick(&mut self, now_ns: u64, written: u64, received: u64, reports: u64) -> Option<TxEvent> {
+        let Some((at, written_then, reports_then)) = self.moved else {
+            if reports > 0 {
+                self.received = received;
+                self.moved = Some((now_ns, written, reports));
+            }
+            return None;
+        };
+        if received != self.received {
+            // Moved on (or the peer reset its counters: start over).
+            let resumed = received > self.received;
+            self.received = received;
+            self.moved = Some((now_ns, written, reports));
+            let stalled = self.stalled_at.take();
+            return stalled.filter(|_| resumed).map(|since| TxEvent::Resumed { stalled_ms: now_ns.saturating_sub(since) / MS });
+        }
+        if self.stalled_at.is_some() {
+            return None;
+        }
+        let quiet_ms = now_ns.saturating_sub(at) / MS;
+        let written_since = written.saturating_sub(written_then);
+        let reports_since = reports.saturating_sub(reports_then);
+        if quiet_ms >= PEER_RX_STALL_MS && written_since >= PEER_RX_STALL_BYTES && reports_since >= PEER_RX_STALL_REPORTS {
+            self.stalled_at = Some(now_ns);
+            self.ever_stalled = true;
+            return Some(TxEvent::Stalled { quiet_ms, written_since, reports_since });
+        }
+        None
+    }
+    /// The peer stopped receiving at some point in this call.
+    pub fn ever_stalled(&self) -> bool {
+        self.ever_stalled
+    }
+    /// True once every `TX_LINE_MS`: time for the call's send-counter line.
+    pub fn line_due(&mut self, now_ns: u64) -> bool {
+        let next = *self.next_line_ns.get_or_insert(now_ns + TX_LINE_MS * MS);
+        if now_ns < next {
+            return false;
+        }
+        self.next_line_ns = Some(now_ns + TX_LINE_MS * MS);
+        true
     }
 }
 
@@ -485,5 +583,93 @@ mod tests {
         }
         assert_eq!(d.queue_ms(), Some(0), "the ring is not queue (it read 10030 ms)");
         assert_eq!(d.delivered_kbps(), Some(200));
+    }
+
+    /// One second of a call through the real estimator: this side writes
+    /// `bytes`, the peer reports what it holds (`delivered` of it arrives).
+    fn second(d: &mut DeliveryEstimate, w: &mut TxWatch, s: u64, bytes: usize, delivered: bool, reported: &mut u64) -> Option<TxEvent> {
+        let now = s * 1_000 * MS;
+        d.on_written(bytes, now);
+        if delivered {
+            *reported += bytes as u64;
+        }
+        d.on_report(*reported as u32, (s * 1_000) as u32, now + 30 * MS);
+        w.tick(now + 40 * MS, d.written(), d.received(), d.reports())
+    }
+
+    #[test]
+    fn a_peer_that_keeps_reporting_but_stops_receiving_is_one_stall_before_its_liveness_hang_up() {
+        // The 2026-11 Windows -> S22 calls: about 3.5 kB/s of voice reached the phone for 27 s,
+        // then nothing did while the phone's reports kept arriving; the phone hung up at about 35 s.
+        let (mut d, mut w, mut reported) = (DeliveryEstimate::default(), TxWatch::default(), 0);
+        for s in 1..=27 {
+            assert_eq!(second(&mut d, &mut w, s, 3_500, true, &mut reported), None, "receiving at {s} s");
+        }
+        let mut events = Vec::new();
+        for s in 28..=35 {
+            if let Some(event) = second(&mut d, &mut w, s, 3_500, false, &mut reported) {
+                events.push((s, event));
+            }
+        }
+        assert_eq!(events.len(), 1, "one stall, said once: {events:?}");
+        let (at, TxEvent::Stalled { quiet_ms, written_since, reports_since }) = events[0] else { panic!("{events:?}") };
+        assert!((32..35).contains(&at), "said before the phone gives up, after 5 s of quiet: at {at} s");
+        assert!(quiet_ms >= PEER_RX_STALL_MS && written_since >= 5 * 3_500 && reports_since >= 5, "{events:?}");
+        assert!(w.ever_stalled());
+        // The peer counting again ends the stall; the call keeps that it happened.
+        assert!(matches!(second(&mut d, &mut w, 36, 3_500, true, &mut reported), Some(TxEvent::Resumed { stalled_ms }) if stalled_ms >= 1_000));
+        assert!(w.ever_stalled());
+    }
+
+    #[test]
+    fn a_working_call_an_old_peer_or_a_muted_microphone_is_never_a_stall() {
+        // Counting peer: never.
+        let (mut d, mut w, mut reported) = (DeliveryEstimate::default(), TxWatch::default(), 0);
+        for s in 1..=60 {
+            assert_eq!(second(&mut d, &mut w, s, 7_000, true, &mut reported), None);
+        }
+        // A peer without delivery reports: nothing is known, nothing is said.
+        let mut quiet = TxWatch::default();
+        for s in 1..=60u64 {
+            assert_eq!(quiet.tick(s * 1_000 * MS, s * 7_000, 0, 0), None);
+        }
+        // A muted microphone: only keep-alives go out, under the byte floor however long.
+        let (mut d, mut w, mut reported) = (DeliveryEstimate::default(), TxWatch::default(), 0);
+        assert_eq!(second(&mut d, &mut w, 1, 3_500, true, &mut reported), None);
+        for s in 2..=60 {
+            assert_eq!(second(&mut d, &mut w, s, 40, false, &mut reported), None, "keep-alives at {s} s");
+        }
+        // Reports that stop together with the data (the peer froze): not this side's direction.
+        let (mut d, mut w, mut reported) = (DeliveryEstimate::default(), TxWatch::default(), 0);
+        for s in 1..=10 {
+            second(&mut d, &mut w, s, 3_500, true, &mut reported);
+        }
+        for s in 11..=30u64 {
+            d.on_written(3_500, s * 1_000 * MS);
+            assert_eq!(w.tick(s * 1_000 * MS, d.written(), d.received(), d.reports()), None);
+        }
+        assert!(!w.ever_stalled());
+    }
+
+    #[test]
+    fn a_peer_counter_reset_starts_the_watch_over() {
+        let (mut d, mut w, mut reported) = (DeliveryEstimate::default(), TxWatch::default(), 0);
+        for s in 1..=5 {
+            second(&mut d, &mut w, s, 3_500, true, &mut reported);
+        }
+        // The peer restarts its counters (smaller value): no stall, no resume, a new baseline.
+        reported = 100;
+        assert_eq!(second(&mut d, &mut w, 6, 3_500, false, &mut reported), None);
+        for s in 7..=9 {
+            assert_eq!(second(&mut d, &mut w, s, 3_500, true, &mut reported), None);
+        }
+        assert!(!w.ever_stalled());
+    }
+
+    #[test]
+    fn the_send_counter_line_comes_every_ten_seconds() {
+        let mut w = TxWatch::default();
+        let due: Vec<u64> = (0..=35).filter(|s| w.line_due(s * 1_000 * MS)).collect();
+        assert_eq!(due, vec![10, 20, 30]);
     }
 }

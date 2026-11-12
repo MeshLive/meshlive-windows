@@ -177,7 +177,7 @@ pub fn handshake<C: Carrier>(
         tag: &|| bvmid2::tag(code),
         extra: &|peer| bvmid2::check_responder(code, peer),
     };
-    tagged_handshake(carrier, &target, identity, wall_epoch, cancelled, trace)
+    tagged_handshake(carrier, &target, identity, wall_epoch, false, cancelled, trace)
 }
 
 /// Both BMH3 handshakes toward the owner of `target.rdi` with this PC's real
@@ -188,6 +188,23 @@ pub fn tagged_handshake<C: Carrier>(
     target: &Target,
     identity: &dyn SigningIdentity,
     wall_epoch: u32,
+    wifi: bool,
+    cancelled: &AtomicBool,
+    trace: &mut dyn FnMut(&str, &str),
+) -> Result<Reached, Error> {
+    tagged_handshake_with(carrier, target, identity, wall_epoch, wifi, false, cancelled, trace)
+}
+
+/// `tagged_handshake`, optionally offering the Design SR renewal capability
+/// in the end-to-end hello. Only a contact call passes `renewal`; a BVMID2
+/// verification scan never does, so no verification link holds `K_renew`.
+pub fn tagged_handshake_with<C: Carrier>(
+    carrier: &mut C,
+    target: &Target,
+    identity: &dyn SigningIdentity,
+    wall_epoch: u32,
+    wifi: bool,
+    renewal: bool,
     cancelled: &AtomicBool,
     trace: &mut dyn FnMut(&str, &str),
 ) -> Result<Reached, Error> {
@@ -201,7 +218,9 @@ pub fn tagged_handshake<C: Carrier>(
         })
     };
     // Link layer.
-    let config = Config::new(Purpose::Link, identity, crate::video::hello_codecs(CAPABILITIES, false)).map_err(at(Stage::Link))?;
+    let config = Config::new(Purpose::Link, identity, crate::video::hello_codecs(CAPABILITIES, false))
+        .map_err(at(Stage::Link))?
+        .with_wifi(wifi);
     let (waiting, m1) = Waiting2::start(config, options()?).map_err(at(Stage::Link))?;
     carrier
         .send(&frame_handshake(&m1).map_err(at(Stage::Link))?, deadline)
@@ -245,6 +264,7 @@ pub fn tagged_handshake<C: Carrier>(
     // displayer's must open the code's RDI.
     let policy = Policy {
         require_opening: opening,
+        wifi,
         ..Policy::default()
     };
     let mut hop_out = Sealer::new(Layer::Hop, link.keys().send_key(), policy).map_err(at(Stage::Link))?;
@@ -280,7 +300,10 @@ pub fn tagged_handshake<C: Carrier>(
     // End-to-end layer in BMS1 type-4 records.
     // A contact call goes through here too: offer call video fragments (bit 7).
     let endpoint_caps = crate::video::hello_codecs(Capabilities {
-        transport: crate::call::fragments::endpoint_transport(CAPABILITIES.transport) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
+        transport: crate::call_renewal::transport(
+            crate::call::fragments::endpoint_transport(CAPABILITIES.transport) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
+            renewal,
+        ),
         // The decoders this PC really has (CF-HS-02), not a constant; Design
         // HC's masks (with bit 4) through `hello_codecs`.
         decode_codecs: crate::video::decode_mask(),
@@ -315,7 +338,7 @@ pub fn tagged_handshake<C: Carrier>(
     trace("qr_endpoint_done", &format!("negotiated={negotiated} fragments={fragments}"));
     // LABELS are opened (the verification scope allows a name label; a
     // contact call has no label support on this PC and never negotiates it).
-    let link = CallLink::continue_link_with(
+    let mut link = CallLink::continue_link_with(
         hop_out,
         hop_in,
         endpoint.keys().send_key(),
@@ -325,6 +348,15 @@ pub fn tagged_handshake<C: Carrier>(
         true,
     )
     .map_err(at(Stage::Call))?;
+    if wifi {
+        link.enable_wifi(endpoint.keys().exporter(), true, false)
+            .map_err(at(Stage::Call))?;
+    }
+    // A contact call is direct (the fingerprint equals the link peer's, checked above).
+    if crate::call_renewal::negotiated(renewal, endpoint_caps.transport, peer.capabilities().transport) {
+        link.enable_renewal(endpoint.keys().send_key(), endpoint.keys().receive_key(), true)
+            .map_err(at(Stage::Call))?;
+    }
     Ok(Reached {
         link,
         peer_fingerprint: *peer.fingerprint(),
@@ -549,7 +581,7 @@ impl ScanSession {
     /// the code's key (the verification event), so a close is the
     /// displayer's normal end: Android closes 2 s after the commit when it
     /// does not take part in the lease exchange (measured on three phones,
-    /// win-userflow-20261019: the PC's next write failed 4 s after its OFFER).
+    /// phone runs of 2026-10-19: the PC's next write failed 4 s after its OFFER).
     pub fn link_lost(&mut self) {
         let why = self.close_at.map_or(End::PeerClosed, |(_, why)| why);
         self.end(why);
@@ -606,7 +638,8 @@ impl ScanSession {
                     self.run(actions, now_ms, hooks);
                 }
                 // Invite and every other call signal, headers, media, key-frame requests.
-                Incoming::Signal(_) | Incoming::Header(_) | Incoming::Media { .. } | Incoming::KeyFrameRequest => {
+                Incoming::Signal(_) | Incoming::Header(_) | Incoming::Media { .. } | Incoming::KeyFrameRequest
+                | Incoming::Wifi(_) | Incoming::WifiFault(_) | Incoming::Renew(_) => {
                     self.scope.refuse_content(0);
                     self.log.push("qr_session violation=content".into());
                     self.end(End::ScopeViolation);

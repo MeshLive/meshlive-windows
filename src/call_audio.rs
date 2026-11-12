@@ -39,6 +39,8 @@ enum Command {
     Play(Vec<i16>),
     Ringback(bool),
     StartCapture(Option<String>),
+    /// The user picked this render endpoint for the call (the Speaker button).
+    Output(String),
     RestartCapture(u64),
     StopCapture,
     Quit,
@@ -63,6 +65,9 @@ pub enum Event {
     RenderOpened(String),
     /// CF-MEDIA-68: the playback speed changed (for the owner's log).
     Speed { speed: f64, lag_ms: f64, baseline_ms: Option<f64> },
+    /// The speaker opened: the outputs the user can pick and the one in use
+    /// (endpoint ids; the call screen's Speaker button).
+    Outputs { outputs: Vec<(String, String)>, current: String },
 }
 
 pub struct CallAudio {
@@ -83,7 +88,7 @@ impl CallAudio {
     }
     /// Stop queued Watch sound on Leave even while the transport is busy.
     pub fn start_watch(gain: f32, leave: Arc<AtomicBool>) -> Self {
-        let enabled = std::env::var("MESHLIVE_WATCH_AUDIO_FENCE").as_deref() != Ok("0");
+        let enabled = watch_fence_enabled();
         Self::with_end_fence(gain, enabled, enabled.then_some(leave))
     }
     fn with_end_fence(gain: f32, enabled: bool, leave: Option<Arc<AtomicBool>>) -> Self {
@@ -124,6 +129,11 @@ impl CallAudio {
     pub fn stop_capture(&self) {
         let _ = self.commands.send(Command::StopCapture);
     }
+    /// Plays the call through this render endpoint from the next chunk on
+    /// (the user's pick; never changes Windows' defaults).
+    pub fn set_output(&self, endpoint: String) {
+        let _ = self.commands.send(Command::Output(endpoint));
+    }
     /// Reopen the source microphone, acknowledging after any old queued frames.
     pub fn restart_capture(&self, fence: u64) {
         let _ = self.commands.send(Command::RestartCapture(fence));
@@ -139,6 +149,13 @@ impl Drop for CallAudio {
             let _ = thread.join();
         }
     }
+}
+
+/// The Watch audio fence (default on). The `=0` control arm keeps queued
+/// sound playing after Leave or End, so only a debug or test-hooks build
+/// reads it (SEC-13).
+pub fn watch_fence_enabled() -> bool {
+    crate::control_arms::var("MESHLIVE_WATCH_AUDIO_FENCE").as_deref() != Some("0")
 }
 
 /// The playback gain from `MESHLIVE_PLAYBACK_GAIN` (0..=1; never above 1).
@@ -221,6 +238,8 @@ struct Worker {
     mic: Option<Mic>,
     watch: Option<DeviceWatch>,
     device: Option<String>,
+    /// The render endpoint the user picked (None: the automatic rule).
+    output: Option<String>,
     sync: crate::time_stretch::PlayoutSync,
     stretch: crate::time_stretch::Wsola,
     stretching: bool,
@@ -248,6 +267,9 @@ impl Worker {
     /// The call's render endpoint: the one in the microphone's device
     /// (`audio_devices::call_render`), else None (the communications default).
     fn render_target(&self) -> Option<(String, &'static str)> {
+        if let Some(chosen) = &self.output {
+            return Some((chosen.clone(), "chosen"));
+        }
         let mic = match &self.mic {
             Some(Mic::Endpoint(m)) => Some(m.endpoint_id.clone()),
             // The DSP captures from the default devices.
@@ -359,6 +381,12 @@ impl Worker {
                     self.mic = None;
                     self.watch = None;
                 }
+                Some(Command::Output(endpoint)) => {
+                    // Reopened on the chosen endpoint at the next chunk.
+                    self.output = Some(endpoint);
+                    self.render = None;
+                    self.render_failed = false;
+                }
                 Some(Command::RestartCapture(fence)) => {
                     self.mic = None;
                     self.watch = None;
@@ -398,9 +426,13 @@ impl Worker {
                         Ok(r) => {
                             if let Some(device) = r.device() {
                                 self.send(Event::RenderOpened(device.describe()));
+                                let outputs = audio_devices::render_outputs(&audio_devices::list());
+                                self.send(Event::Outputs { outputs, current: device.endpoint_id().to_owned() });
                             }
                             self.render = Some(r);
                         }
+                        // The chosen output went away: back to the automatic one.
+                        Err(_) if self.output.take().is_some() => {}
                         Err(error) => {
                             self.render_failed = true;
                             self.queue.clear();

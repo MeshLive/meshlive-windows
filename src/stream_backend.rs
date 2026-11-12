@@ -6,7 +6,7 @@ use meshlive::{
     bmh2::SigningIdentity, stream_watch::{self, Target, Offers}, rotating::OpeningEntry,
     verify_scan::Carrier, watch::{Event, Header},
 };
-use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::Sender}, thread::JoinHandle, time::{Duration, Instant}};
+use std::{path::PathBuf, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc::Sender}, thread::JoinHandle, time::{Duration, Instant}};
 
 pub struct Task {
     cancel: Arc<AtomicBool>,
@@ -14,12 +14,14 @@ pub struct Task {
     worker: Option<JoinHandle<()>>,
 }
 impl Task {
-    pub fn watch(dir: PathBuf, selected: Sighting, updates: Sender<Update>) -> Self {
+    /// `hidden`: the radio owner's hidden routes (a blocked source's route is added).
+    /// `watch`: this watch's id, echoed in its updates.
+    pub fn watch(dir: PathBuf, selected: Sighting, updates: Sender<Update>, hidden: Arc<Mutex<stream_watch::HiddenRoutes>>, watch: u64) -> Self {
         let cancel = Arc::new(AtomicBool::new(false)); let muted = Arc::new(AtomicBool::new(false));
         let (stop, mute) = (cancel.clone(), muted.clone());
         let failed = updates.clone();
         let worker = std::thread::Builder::new().name("meshlive-watch".into()).spawn(move || {
-            if let Err(error) = run(dir, selected, &stop, &mute, &updates) {
+            if let Err(error) = run(dir, selected, &stop, &mute, &updates, &hidden, watch) {
                 let _ = updates.send(Update::WatchNote(Some(format!("Couldn't watch. {error}"))));
                 let _ = updates.send(Update::Watch(WatchEvent::GaveUp));
             }
@@ -34,6 +36,16 @@ impl Drop for Task {
         self.cancel.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() { let _ = worker.join(); }
     }
+}
+
+/// A joined route whose source is blocked: a source this PC authenticated
+/// is blocked for the whole watch (hide this route, leave); a forwarder's
+/// claim ends only this attempt (try the next route). True: hide and leave.
+fn blocked_join_route(authenticated: bool, hidden: &Mutex<stream_watch::HiddenRoutes>, route: stream_watch::StreamRoute, source: [u8; 16]) -> bool {
+    if authenticated {
+        hidden.lock().unwrap_or_else(|e| e.into_inner()).hide(route, source);
+    }
+    authenticated
 }
 
 fn debug(error: impl std::fmt::Debug) -> String { format!("{error:?}") }
@@ -56,13 +68,14 @@ fn entry(vault: &mut meshlive::presence::Vault, node: &[u8; 16], epoch: u32) -> 
     OpeningEntry::own(key, node, epoch, meshlive::rotating::ROLE_VIEWER_REQUEST).map_err(debug)
 }
 
-fn run(dir: PathBuf, selected: Sighting, stop: &Arc<AtomicBool>, muted: &AtomicBool, out: &Sender<Update>) -> Result<(), String> {
+fn run(dir: PathBuf, selected: Sighting, stop: &Arc<AtomicBool>, muted: &AtomicBool, out: &Sender<Update>, hidden: &Mutex<stream_watch::HiddenRoutes>, watch: u64) -> Result<(), String> {
     meshlive::callee::policy(&mut |_, _| {}).map_err(str::to_owned)?;
     let _lease = meshlive::callee::AnnouncementLease::acquire().ok_or("MeshLive is already announcing in another window.")?;
     let (identity, _) = meshlive::identity::Identity::open_or_create().map_err(debug)?;
     let node = meshlive::crypto::sha256(&identity.public_key().map_err(debug)?).map_err(debug)?[..16].try_into().unwrap();
     let mut epochs = meshlive::epoch_store::EpochOwner::open(&dir, meshlive::epoch_store::system_clocks().1);
     let mut vault = meshlive::presence::Vault::open_default(&dir);
+    let blocks = meshlive::blocking::BlockList::open_default(&dir);
     let mask = stream_watch::decode_mask();
     if let Some(reason) = stream_watch::unavailable(&selected.announcement, mask) { return Err(reason.into()); }
     let idle_scan = stream_watch::idle_scan_enabled();
@@ -125,6 +138,33 @@ fn run(dir: PathBuf, selected: Sighting, stop: &Arc<AtomicBool>, muted: &AtomicB
         let joined = stream_watch::join(&mut peripheral, &identity, &chosen.announcement, &entries, epoch(&mut epochs, &mut vault)?, mask, pin, stop);
         let result = match joined {
             Ok(mut joined) => {
+                // Android PersonPolicy (review 2026-10-27, finding 4): a
+                // blocked person's stream is left as soon as its source is
+                // known, before any media. Only a source this PC
+                // authenticated (a direct route) hides the route; a
+                // forwarder's claim ends only this attempt. An unreadable
+                // list blocks nobody.
+                if blocks.list().is_ok_and(|list| meshlive::blocking::node_blocked(&list, &joined.source)) {
+                    let authenticated = joined.source_fingerprint.is_some();
+                    let route = stream_watch::StreamRoute::of(&chosen.announcement);
+                    if blocked_join_route(authenticated, hidden, route, joined.source) {
+                        crate::radio_backend::trace("watch_left", &format!("reason=blocked_person authenticated={authenticated}"));
+                        peripheral.close();
+                        let _ = out.send(Update::WatchSourceBlocked { id: watch });
+                        return Ok(());
+                    }
+                    // A forwarder's claim is not authenticated: end only this
+                    // attempt (the same suppression a failed join applies) and
+                    // try the next route, for example the direct one.
+                    crate::radio_backend::trace("watch_left", &format!("reason=blocked_claim authenticated={authenticated}"));
+                    peripheral.close();
+                    offers.suppress(&chosen, Instant::now(), Duration::from_secs(1));
+                    continue;
+                }
+                if let Some(fingerprint) = joined.source_fingerprint {
+                    let route = stream_watch::StreamRoute::of(&chosen.announcement);
+                    let _ = out.send(Update::WatchSource { id: watch, fingerprint, route });
+                }
                 if idle_scan { scanner = None; }
                 peripheral.stop_announcement();
                 let r = play(&mut peripheral, &mut joined, &mut pin, chosen.announcement.cost, stop, muted, out);
@@ -182,6 +222,8 @@ fn play(p: &mut Peripheral, joined: &mut stream_watch::Joined, pin: &mut Option<
     let mut has_audio = true;
     let mut requested_key = started.checked_sub(Duration::from_secs(2)).unwrap_or(started);
     let mut pcm = vec![0i16; meshlive::opus::Decoder::MAX_SAMPLES];
+    // The radio listener's level meter, about ten times a second.
+    let mut level_at = started;
     // Drop sound before joining the video decoder on every return path.
     let sound = meshlive::call_audio::CallAudio::start_watch(meshlive::call_audio::gain_from_env(), stop.clone());
     while !stop.load(Ordering::Acquire) {
@@ -198,6 +240,10 @@ fn play(p: &mut Peripheral, joined: &mut stream_watch::Joined, pin: &mut Option<
             audio.pump(now_ns, 20_000_000, &mut pcm, |_, pcm| {
                 #[cfg(test)]
                 { crate::phone_checks::media_received(); crate::phone_checks::AUDIO_SAMPLES.fetch_add(pcm.len() as u64, Ordering::Relaxed); }
+                if radio && level_at.elapsed() >= Duration::from_millis(100) {
+                    level_at = Instant::now();
+                    let _ = out.send(Update::WatchLevel(meshlive::audio_live::level(pcm)));
+                }
                 sound.play(if muted.load(Ordering::Acquire) { vec![0; pcm.len()] } else { pcm.to_vec() });
             }).map_err(debug)?;
         }
@@ -328,6 +374,19 @@ mod tests {
                 assert!(matches!(source.read(&mut p.sent[1].as_slice()).unwrap(), Some(Control::EndAck)));
             } else { assert!(p.sent.is_empty(), "an expired budget cannot submit a record"); }
         }
+    }
+
+    /// A forwarder's blocked-source claim ends only this attempt and hides
+    /// nothing; a source this PC authenticated hides its route and ends the
+    /// watch.
+    #[test]
+    fn a_blocked_claim_hides_nothing_and_an_authenticated_blocked_source_hides_its_route() {
+        let route = stream_watch::StreamRoute { logical: 7, prefix: [3; 6] };
+        let hidden = Mutex::new(stream_watch::HiddenRoutes::default());
+        assert!(!blocked_join_route(false, &hidden, route, [9; 16]));
+        assert!(!hidden.lock().unwrap().contains(&route), "a claim hides no route");
+        assert!(blocked_join_route(true, &hidden, route, [9; 16]));
+        assert!(hidden.lock().unwrap().contains(&route), "an authenticated source's route is hidden");
     }
 
     #[test]

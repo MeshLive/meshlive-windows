@@ -470,7 +470,7 @@ fn rule_5_keyframes_activation_and_replacement() {
 fn rule_6_envelope_crop_and_padding() {
     let s = HevcSps::default();
     let call = |w: u32, h: u32| Gate::new(Codec::Hevc, w, h);
-    // HEVC (root decision 2026-10-28): NVIDIA's 448x256 for a 426x240 header,
+    // HEVC (design decision 2026-10-28): NVIDIA's 448x256 for a 426x240 header,
     // cropped back to exactly 426x240, is accepted.
     let nvidia = HevcSps { width: 448, height: 256, crop: Some([0, 11, 0, 8]), ..s };
     let sets = call(426, 240).check(&hevc_idr(nvidia), true).unwrap().activated.unwrap();

@@ -533,14 +533,14 @@ fn a_contact_tag_from_a_stored_lease_reaches_the_contact_with_its_real_key() {
     let real = |peer: &Peer| if peer.extensions().pseudonym { Err(bmh3::Error::Policy) } else { Ok(()) };
     let target = Target { rdi, tag: &tag, extra: &real };
     let never = AtomicBool::new(false);
-    let reached = tagged_handshake(&mut pc, &target, &me, EPOCH, &never, &mut |_, _| {}).unwrap();
+    let reached = tagged_handshake(&mut pc, &target, &me, EPOCH, false, &never, &mut |_, _| {}).unwrap();
     assert_eq!(reached.peer_node, node);
     assert_eq!(reached.peer_capabilities.transport & 8, 8);
     // Another contact's lease key is a different tag: the phone answers no one.
     let (mut pc, phone) = pipes();
     let _thread = displayer(phone, [9; 32], shown.day_keys.clone(), shown.node, Displayer::Silent);
     let (me, _, _) = identities();
-    assert!(tagged_handshake(&mut pc, &target, &me, EPOCH, &never, &mut |_, _| {}).is_err());
+    assert!(tagged_handshake(&mut pc, &target, &me, EPOCH, false, &never, &mut |_, _| {}).is_err());
 }
 
 #[test]

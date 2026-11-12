@@ -37,7 +37,8 @@ pub const ENTRIES: &[Entry] = &[Entry {
 }];
 
 /// Experimental, off by default: `MESHLIVE_QW_UNLISTED=1` lets an unlisted
-/// adapter announce so a new family can be measured. Never for users.
+/// adapter announce so a new family can be measured. Never for users: only a
+/// debug or test-hooks build reads it (SEC-13).
 pub const UNLISTED_SWITCH: &str = "MESHLIVE_QW_UNLISTED";
 /// Off-switch: `MESHLIVE_QW=0` never announces (outgoing calls only).
 pub const OFF_SWITCH: &str = "MESHLIVE_QW";
@@ -99,8 +100,13 @@ pub fn os_build() -> Option<u32> {
 
 /// The live verdict from this PC's adapter, Windows build and switches.
 pub fn current(device_id: Option<&str>) -> Result<&'static str, &'static str> {
-    let env = |name: &str| std::env::var(name).ok();
-    verdict(device_id, os_build(), env(OFF_SWITCH).as_deref() == Some("0"), env(UNLISTED_SWITCH).as_deref() == Some("1"))
+    current_in(crate::control_arms::READABLE, device_id, &|name| std::env::var(name).ok())
+}
+/// `current` with a build's control-arm readability (`READABLE`) and environment.
+pub fn current_in(arms_readable: bool, device_id: Option<&str>, env: &dyn Fn(&str) -> Option<String>)
+    -> Result<&'static str, &'static str> {
+    let unlisted = crate::control_arms::gated(arms_readable, UNLISTED_SWITCH, env);
+    verdict(device_id, os_build(), env(OFF_SWITCH).as_deref() == Some("0"), unlisted.as_deref() == Some("1"))
 }
 
 #[cfg(test)]

@@ -80,7 +80,7 @@ pub fn value_capacity(att_mtu: u16) -> Result<usize, Error> {
 /// 11) dropped a split ACL start fragment ("L2CAP packet too small",
 /// "continuation for unknown packet") in 2 of 6 PC -> phone calls at 514-byte
 /// values, and the lost chunk stalled the call until the phone's 8 s
-/// liveness timeout. A/B (gvm-A/B, 2026-10-20): at 244 the drop still
+/// liveness timeout. A/B (2026-10-20): at 244 the drop still
 /// came (1-byte start fragments), so the value size is not the cause; off.
 pub fn value_max() -> usize {
     static MAX: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
@@ -532,6 +532,8 @@ fn drop_every() -> u32 {
 pub struct Writer {
     sequence: i32,
     failed: bool,
+    /// WP6NH: the call's peer is blocked: no GR1 value goes out any more.
+    fenced: bool,
 }
 impl Writer {
     pub fn write(
@@ -544,7 +546,8 @@ impl Writer {
         if self.failed {
             return Err(Error::Closed);
         }
-        let recovery = io.recovery_pipe().and_then(|p| p.recovery());
+        // WP6NH: a fenced writer sends new data only (no resend of a pre-block chunk).
+        let recovery = if self.fenced { None } else { io.recovery_pipe().and_then(|p| p.recovery()) };
         let result = (|| {
             while !bytes.is_empty() {
                 if cancelled.load(Ordering::Acquire) {
@@ -606,6 +609,18 @@ impl Writer {
             io.abort();
         }
         result
+    }
+    /// WP6NH: the call's peer is blocked. The link's GR1 recovery is closed
+    /// once (its queue of resends and requests is purged and its history is
+    /// never answered again), and later writes skip it. A no-op without GR1.
+    pub fn fence_recovery(&mut self, io: &impl LinkIo) {
+        if self.fenced {
+            return;
+        }
+        self.fenced = true;
+        if let Some(recovery) = io.recovery_pipe().and_then(|p| p.recovery()) {
+            recovery.close();
+        }
     }
     /// Sends the queued GR1 values (a resend is the stored value unchanged).
     fn drain(recovery: &super::gr1::Recovery, io: &mut impl LinkIo, deadline: Instant, cancelled: &AtomicBool) -> Result<(), Error> {
@@ -948,6 +963,36 @@ mod tests {
         assert!(log.iter().any(|l| l.starts_with("event=recovered | seq=3 | count=1")), "{log:?}");
         let sender_log: Vec<_> = a.own.take_notes().into_iter().map(|(_, l)| l).collect();
         assert!(sender_log.iter().any(|l| l.starts_with("event=resend | seq=3 | bytes=64 | queuedAheadMs=")), "{sender_log:?}");
+    }
+    /// WP6NH step 2: A has sent data whose chunk 3 was lost and B's NACK has
+    /// queued its resend at A; then A writes the ordinary end, fenced (the call
+    /// was blocked) or not. Returns what A sent and the resent chunk.
+    fn write_end_after_a_queued_resend(fenced: bool) -> (Vec<Vec<u8>>, Vec<u8>) {
+        let (mut a, mut b) = pair(vec![3]);
+        let (mut wa, mut wb) = (Writer::default(), Writer::default());
+        let stop = AtomicBool::new(false);
+        wb.service(&mut b, deadline(), &stop).unwrap();
+        wa.service(&mut a, deadline(), &stop).unwrap();
+        wa.write(&[5; 59 * 8], &mut a, deadline(), &stop).unwrap();
+        wb.service(&mut b, deadline(), &stop).unwrap();
+        assert_eq!(b.sent.iter().filter(|v| v[0] == 2 && v[3] == 2).count(), 1, "B asked for chunk 3");
+        if fenced {
+            wa.fence_recovery(&a);
+        }
+        wa.write(&[0xee; 20], &mut a, deadline(), &stop).unwrap();
+        let original = a.sent.iter().find(|v| v[0] == 1 && v[1..5] == 3i32.to_be_bytes()).unwrap().clone();
+        assert!(a.sent.iter().any(|v| v[0] == 1 && v[5..] == [0xee; 20]), "the end was sent");
+        (a.sent, original)
+    }
+    #[test]
+    fn a_blocked_call_writes_its_end_without_resending_a_pre_block_chunk() {
+        let (sent, original) = write_end_after_a_queued_resend(true);
+        assert_eq!(sent.iter().filter(|v| **v == original).count(), 1, "no resend of the pre-block chunk");
+    }
+    #[test]
+    fn an_unblocked_call_still_resends_before_its_next_write() {
+        let (sent, original) = write_end_after_a_queued_resend(false);
+        assert_eq!(sent.iter().filter(|v| **v == original).count(), 2, "the resend goes");
     }
     #[test]
     fn without_the_peer_hello_the_reader_keeps_option_a() {

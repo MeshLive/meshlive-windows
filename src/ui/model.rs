@@ -3,6 +3,7 @@
 //! never touches a radio, camera, microphone or audio endpoint. A `Backend`
 //! (ui/backend.rs) feeds it events and carries out its commands.
 use meshlive::call::{self, Action, Controller, Message, Phase, Reason, Signal};
+use std::time::{Duration, Instant};
 
 /// Opaque handle a backend assigns to a stream, person or contact.
 pub type Handle = u32;
@@ -90,7 +91,7 @@ impl Person {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Contact {
     pub id: Handle,
     pub name: String,
@@ -101,13 +102,39 @@ pub struct Contact {
     pub lease: bool,
     /// Calls from this contact are declined silently (CF-CALL-24).
     pub blocked: bool,
+    /// Their ID (`SSSSS-SSSSS`): the contact sheet's "ID" line.
+    pub handle: String,
+    /// When they were verified, as this PC's date ("Nov 6, 2026"); empty when unknown.
+    pub verified_on: String,
+    /// Their full ID: the fingerprint as upper-case hex, four groups of four
+    /// per line (Android `IdentityFormat.groupedHex`).
+    pub full_id: String,
+    /// What they call themselves in calls (Naming v2); never their title.
+    pub claim: Option<ClaimNote>,
+    /// You and they scanned each other's code (the claims store's fact).
+    pub both_ways: bool,
 }
+
+/// What a verified contact calls themselves (Android `ContactClaim`), shown
+/// on the contact sheet only. Your label stays their name either way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClaimNote {
+    /// "They call themselves %s".
+    CallsThemselves(String),
+    /// A newer name you have not seen: the one note, with "Use it as my
+    /// label" and "Ignore".
+    Changed(String),
+}
+/// A contact only checked by code, never scanned in person (Android
+/// `DisplayIdentityText.CHECKED_BY_CODE`): lists say so and draw no full check.
+pub const CHECKED_BY_CODE: &str = "Checked by code";
+
 impl Contact {
     pub fn subtitle(&self) -> String {
         let how = if self.by_qr {
             "Verified by QR code"
         } else {
-            "Verified by safety code"
+            CHECKED_BY_CODE
         };
         if self.nearby {
             format!("{how} \u{b7} Nearby now")
@@ -115,6 +142,24 @@ impl Contact {
             how.into()
         }
     }
+}
+
+/// One row of Settings > Privacy > Blocked people.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockedPerson {
+    pub fingerprint: [u8; 32],
+    /// Your label for a verified contact, else their ID (`SSSSS-SSSSS`).
+    pub name: String,
+    /// When it was blocked (ms since 1970, UTC); 0 when unknown.
+    pub since_ms: i64,
+}
+
+/// The block list as the contact layer read it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlockedView {
+    pub people: Vec<BlockedPerson>,
+    /// The list can't be read: calls are not blocked until it is reset.
+    pub unreadable: bool,
 }
 
 /// The Add contact (Meet) screen's scan of a typed or pasted code.
@@ -185,6 +230,42 @@ pub enum WatchEvent {
     GaveUp,
 }
 
+/// Android `viewer_picture_stalled` / `viewer_signal_lost`.
+pub const VIEWER_PICTURE_STALLED: &str = "Picture stalled \u{2014} waiting";
+pub const VIEWER_SIGNAL_LOST: &str = "Signal lost \u{2014} reconnecting";
+/// The status under a stalled picture (Android `watch_status_stalled`).
+pub const WATCH_STATUS_STALLED: &str = "Picture stalled";
+/// No new picture for longer than this is a freeze (Android
+/// `ViewerFrameAgeConfig.MIN_STALE_MS`: shorter gaps are Bluetooth delivery
+/// working as designed).
+pub const FROZEN_AFTER: Duration = Duration::from_millis(1_500);
+
+/// What "Warn when video freezes" shows now (Android `ViewerStaleUiPlan`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Freeze {
+    /// Nothing to say: no picture yet, ended, paused or camera off.
+    Waiting,
+    /// Pictures keep coming; the last one came this long ago.
+    Fresh(Duration),
+    /// No new picture for longer than [`FROZEN_AFTER`] with the signal up.
+    Stalled(Duration),
+    /// The signal dropped; the last picture came this long ago.
+    SignalLost(Duration),
+}
+
+/// "<1 s", "3.2 s", "1 min 05 s" (Android `ViewerFrameAgeText.age`; rounded
+/// down to a tenth, so a rising age never reads ahead).
+pub fn frame_age_text(age: Duration) -> String {
+    let ms = age.as_millis() as u64;
+    if ms < 1_000 {
+        "<1 s".into()
+    } else if ms < 60_000 {
+        format!("{}.{} s", ms / 1_000, ms / 100 % 10)
+    } else {
+        format!("{} min {:02} s", ms / 60_000, ms / 1_000 % 60)
+    }
+}
+
 /// Watching a stream, video or audio-only (radio). Ended is final.
 #[derive(Clone, Debug)]
 pub struct WatchModel {
@@ -195,6 +276,14 @@ pub struct WatchModel {
     pub source_state: meshlive::stream_watch::PlaybackState,
     pub stalled: bool,
     pub route: Reach,
+    /// When this PC last showed a new picture of the stream (None: none yet).
+    pub last_picture: Option<Instant>,
+    /// The signal dropped and no picture came since (Android `lossEpoch`).
+    lost: bool,
+    /// A pause or camera off was seen: the stall clock restarts after it.
+    quiet: bool,
+    /// Stalls count from here (Android `referenceFloorNs`).
+    stall_from: Option<Instant>,
 }
 impl WatchModel {
     pub fn new(stream: StreamEntry) -> Self {
@@ -208,7 +297,38 @@ impl WatchModel {
             source_state: Default::default(),
             stalled: false,
             route,
+            last_picture: None,
+            lost: false,
+            quiet: false,
+            stall_from: None,
         }
+    }
+    /// A new picture of this stream was shown (Android `onFramePresented`).
+    pub fn picture(&mut self, now: Instant) {
+        self.last_picture = Some(now);
+        self.lost = false;
+    }
+    /// The picture now (Android `ViewerFrameAgeMonitor.snapshot`): a lost
+    /// signal stays lost until the next picture; a pause or camera off is no
+    /// freeze, and the stall clock restarts when it ends.
+    pub fn freeze(&mut self, now: Instant) -> Freeze {
+        let Some(last) = self.last_picture else { return Freeze::Waiting };
+        let since = now.saturating_duration_since(last);
+        if self.state == WatchState::Ended {
+            return Freeze::Waiting;
+        }
+        if self.lost || self.state == WatchState::Reconnecting {
+            return Freeze::SignalLost(since);
+        }
+        if self.paused || self.source_state.camera_off {
+            self.quiet = true;
+            return Freeze::Waiting;
+        }
+        if std::mem::take(&mut self.quiet) {
+            self.stall_from = Some(now);
+        }
+        let counted = self.stall_from.map_or(since, |from| now.saturating_duration_since(from.max(last)));
+        if counted > FROZEN_AFTER { Freeze::Stalled(since) } else { Freeze::Fresh(since) }
     }
     pub fn on(&mut self, event: WatchEvent) {
         use {WatchEvent as E, WatchState as S};
@@ -225,6 +345,7 @@ impl WatchModel {
             }
             (S::Playing, E::Lost) => {
                 self.source_state = Default::default(); self.paused = false;
+                self.lost = true;
                 S::Reconnecting
             }
             (s, E::Paused(p)) => {
@@ -257,13 +378,13 @@ impl WatchModel {
             WatchState::Connecting if radio => "Connecting\u{2026}".into(),
             WatchState::Connecting => "Connecting to live video".into(),
             WatchState::Reconnecting if radio => "Reconnecting\u{2026}".into(),
-            WatchState::Reconnecting => "Signal lost \u{2014} reconnecting".into(),
+            WatchState::Reconnecting => VIEWER_SIGNAL_LOST.into(),
             WatchState::Ended => "Ended".into(),
             WatchState::Playing if self.paused => "Paused by broadcaster".into(),
             WatchState::Playing if !radio && self.source_state.camera_off && self.source_state.source_muted => "Camera off. Microphone muted".into(),
             WatchState::Playing if !radio && self.source_state.camera_off => "Camera off".into(),
             WatchState::Playing if !radio && self.source_state.source_muted => "Microphone muted".into(),
-            WatchState::Playing if self.stalled => "Picture stalled \u{2014} waiting".into(),
+            WatchState::Playing if self.stalled => VIEWER_PICTURE_STALLED.into(),
             WatchState::Playing if radio && self.muted => "Live. Muted".into(),
             WatchState::Playing => "Live".into(),
         }
@@ -509,6 +630,13 @@ pub struct GoLiveModel {
     /// Audio-only broadcasts show a disclosure first (audio_live_disclosure_*).
     pub disclosed: bool,
     pub error: Option<&'static str>,
+    /// When the broadcast went live (the timer); None while not live.
+    pub live_since: Option<Instant>,
+    /// Audio only: the "Still broadcasting" reminder (Android
+    /// `AudioLiveReminderPolicy`); None for video and while not live.
+    pub reminder: Option<ReminderPolicy>,
+    /// The microphone level for the meter, 0..1 (audio only).
+    pub level: f32,
 }
 impl Default for GoLiveModel {
     fn default() -> Self {
@@ -521,6 +649,9 @@ impl Default for GoLiveModel {
             camera_off: false,
             disclosed: false,
             error: None,
+            live_since: None,
+            reminder: None,
+            level: 0.0,
         }
     }
 }
@@ -557,6 +688,29 @@ impl GoLiveModel {
             _ => {}
         }
     }
+    /// `on` with the clock: the timer starts when the broadcast goes live,
+    /// an audio-only broadcast starts its reminder then, and the listener
+    /// count feeds the reminder. Anything that ends the broadcast clears both.
+    pub fn on_at(&mut self, event: LiveEvent, now: Instant, limits: ReminderLimits) {
+        let before = self.state;
+        self.on(event);
+        if before == LiveState::Starting && self.state == LiveState::Live {
+            self.live_since = Some(now);
+            self.reminder = (self.kind == LiveKind::AudioOnly).then(|| ReminderPolicy::new(now, limits));
+        }
+        if let (LiveEvent::Viewers(count), Some(reminder)) = (event, self.reminder.as_mut()) {
+            reminder.on_listeners(count, now);
+        }
+        if !self.running() {
+            self.live_since = None;
+            self.reminder = None;
+            self.level = 0.0;
+        }
+    }
+    /// Whole seconds on air (the timer), None while not live.
+    pub fn elapsed(&self, now: Instant) -> Option<u64> {
+        self.live_since.map(|since| now.saturating_duration_since(since).as_secs())
+    }
     pub fn toggle_pause(&mut self) {
         self.state = match self.state {
             LiveState::Live => LiveState::Paused,
@@ -572,6 +726,9 @@ impl GoLiveModel {
             self.state = LiveState::Ended;
             self.viewers = 0;
         }
+        self.live_since = None;
+        self.reminder = None;
+        self.level = 0.0;
     }
     pub fn running(&self) -> bool {
         matches!(
@@ -604,51 +761,171 @@ impl GoLiveModel {
     }
 }
 
+/// The live timer as Android shows it: "4:07", "1:02:03".
+pub fn live_timer(seconds: u64) -> String {
+    if seconds >= 3600 {
+        format!("{}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
+    } else {
+        format!("{}:{:02}", seconds / 60, seconds % 60)
+    }
+}
+
+/// Android `AudioLiveReminderPolicy`'s times: remind after 30 min with no
+/// listener or 2 h on air, stop 5 min after an unanswered reminder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReminderLimits {
+    pub no_listener: Duration,
+    pub total: Duration,
+    pub unanswered_stop: Duration,
+}
+impl ReminderLimits {
+    pub const ANDROID: Self = Self {
+        no_listener: Duration::from_secs(30 * 60),
+        total: Duration::from_secs(2 * 60 * 60),
+        unanswered_stop: Duration::from_secs(5 * 60),
+    };
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReminderAction {
+    None,
+    /// Show "Still broadcasting".
+    Remind,
+    /// Nobody answered the reminder: stop the broadcast.
+    Stop,
+}
+/// A forgotten open microphone is a privacy risk: an audio broadcast reminds
+/// its owner and stops itself when nobody answers (Android
+/// `AudioLiveReminderPolicy`, the same rules).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReminderPolicy {
+    limits: ReminderLimits,
+    last_answered: Instant,
+    empty_since: Option<Instant>,
+    reminded_at: Option<Instant>,
+}
+impl ReminderPolicy {
+    pub fn new(start: Instant, limits: ReminderLimits) -> Self {
+        Self { limits, last_answered: start, empty_since: Some(start), reminded_at: None }
+    }
+    pub fn on_listeners(&mut self, count: u32, now: Instant) {
+        if count > 0 {
+            self.empty_since = None;
+        } else if self.empty_since.is_none() {
+            self.empty_since = Some(now);
+        }
+    }
+    /// The user answered the reminder: the clocks start again.
+    pub fn on_user_present(&mut self, now: Instant) {
+        self.last_answered = now;
+        self.reminded_at = None;
+        if self.empty_since.is_some() {
+            self.empty_since = Some(now);
+        }
+    }
+    pub fn decide(&mut self, now: Instant) -> ReminderAction {
+        if let Some(at) = self.reminded_at {
+            return if now.saturating_duration_since(at) >= self.limits.unanswered_stop { ReminderAction::Stop } else { ReminderAction::None };
+        }
+        let total = now.saturating_duration_since(self.last_answered) >= self.limits.total;
+        let empty = self.empty_since.is_some_and(|since| now.saturating_duration_since(since) >= self.limits.no_listener);
+        if !(total || empty) {
+            return ReminderAction::None;
+        }
+        self.reminded_at = Some(now);
+        ReminderAction::Remind
+    }
+}
+
+/// Android `HoldToTalkCore` for the call's Mute button: while muted, holding
+/// Mute for `HOLD_SECONDS` opens the microphone until the button is let go;
+/// a short press stays an ordinary click (Unmute). Times are the frame's
+/// input time in seconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HoldToTalk {
+    pressed_at: Option<f64>,
+    pub talking: bool,
+}
+/// What one frame of the hold means for the call.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HoldStep {
+    /// Some(true): start talking; Some(false): stop talking.
+    pub talk: Option<bool>,
+    /// This frame's click ended a hold: it is not a Mute toggle.
+    pub swallow_click: bool,
+}
+impl HoldToTalk {
+    pub const HOLD_SECONDS: f64 = 0.35;
+    /// `down`: the pointer is held on Mute (and the window has focus);
+    /// `can_start`: the call is muted.
+    pub fn frame(&mut self, down: bool, can_start: bool, now: f64) -> HoldStep {
+        if down {
+            let since = *self.pressed_at.get_or_insert(now);
+            if !self.talking && can_start && now - since >= Self::HOLD_SECONDS {
+                self.talking = true;
+                return HoldStep { talk: Some(true), swallow_click: false };
+            }
+            return HoldStep::default();
+        }
+        self.pressed_at = None;
+        if self.talking {
+            self.talking = false;
+            return HoldStep { talk: Some(false), swallow_click: true };
+        }
+        HoldStep::default()
+    }
+    /// A hold is under way (the screen keeps repainting to time it).
+    pub fn pressed(&self) -> bool {
+        self.pressed_at.is_some()
+    }
+}
+
 // ---------------------------------------------------------------- settings
 
-/// Privacy and feature switches, with Android's defaults (NamingFeatureDefaults).
+/// Settings switches, with Android's defaults. These have no field, so a value
+/// saved by an older build is ignored (settings_store): Friendly names and
+/// "Show my name before they answer" (always on since 2026-11-04); Voice calls,
+/// Play ringing tone and "Show my stream title to everyone nearby" (Android has
+/// had no switch for them since 2026-10-17); "Relay video for others" (read by
+/// nothing: this PC has no stream forwarder); the never-wired "Codes that
+/// expire", "Accept older verification codes", "Visible by name" and "Visible to
+/// contacts" (removed 2026-11-05, README "Switches").
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Switches {
-    pub generated_names: bool,
-    pub title_pages: bool,
-    pub names_before_answer: bool,
-    pub bvmid2: bool,
-    pub bvmid1_compat: bool,
-    pub visible_by_name: bool,
-    pub voice_calls: bool,
-    pub ringback: bool,
     /// CF-CALL-24 "Block unknown callers" (default off).
     pub block_unknown: bool,
-    pub relay: bool,
     /// Receive calls: needs the peripheral role (capability gate).
     pub receive_calls: bool,
-    /// Visible to contacts: call-ready presence is an advertisement (gate).
-    pub visible_to_contacts: bool,
     /// The first-run welcome was seen (saved; never shown again).
     pub onboarded: bool,
     /// Settings > Start with Windows (off by default): start in the tray at sign-in.
     pub start_with_windows: bool,
     /// The tray's one-time "keeps running" notice was shown (saved).
     pub tray_hint_shown: bool,
+    /// "Not now" on "Declined. Block all unknown callers?" (Android
+    /// `block_unknown_offer_dismissed`; saved, so it is never asked again).
+    pub block_unknown_offer_dismissed: bool,
+    /// Settings > Video quality > "Fill screen with video" (Android
+    /// `videoFillSwitch`, on): the other person's picture fills the video area.
+    pub video_fill: bool,
+    /// Settings > Video quality > "Warn when video freezes" (Android
+    /// `ViewerFeatures.frameAge`; Experimental, off).
+    pub frame_age: bool,
+    /// "Who sees my name" (Android `NamesAudience`, default everyone). Saved;
+    /// read by the call code from WP4 part 2 (not shown before then).
+    pub names_audience: meshlive::label_policy::NamesAudience,
 }
 impl Default for Switches {
     fn default() -> Self {
         Self {
-            generated_names: true,
-            title_pages: true,
-            names_before_answer: true,
-            bvmid2: false,
-            bvmid1_compat: false,
-            visible_by_name: false,
-            voice_calls: true,
-            ringback: true,
             block_unknown: false,
-            relay: true,
             receive_calls: true,
-            visible_to_contacts: false,
             onboarded: false,
             start_with_windows: false,
             tray_hint_shown: false,
+            block_unknown_offer_dismissed: false,
+            video_fill: true,
+            frame_age: false,
+            names_audience: meshlive::label_policy::NamesAudience::Everyone,
         }
     }
 }
@@ -865,9 +1142,66 @@ mod tests {
         assert_eq!(g.status(), "Paused, 4 watching");
     }
     #[test]
+    fn an_audio_broadcast_reminds_after_30_minutes_alone_or_2_hours_and_stops_5_minutes_after_no_answer() {
+        let start = Instant::now();
+        let min = |m: u64| start + Duration::from_secs(m * 60);
+        let mut p = ReminderPolicy::new(start, ReminderLimits::ANDROID);
+        assert_eq!(p.decide(min(29)), ReminderAction::None);
+        assert_eq!(p.decide(min(30)), ReminderAction::Remind, "30 min with nobody listening");
+        assert_eq!(p.decide(min(34)), ReminderAction::None, "one reminder, then a wait");
+        assert_eq!(p.decide(min(35)), ReminderAction::Stop, "5 min without an answer");
+        let mut answered = ReminderPolicy::new(start, ReminderLimits::ANDROID);
+        assert_eq!(answered.decide(min(30)), ReminderAction::Remind);
+        answered.on_user_present(min(31));
+        assert_eq!(answered.decide(min(40)), ReminderAction::None, "an answer starts the clocks again");
+        assert_eq!(answered.decide(min(61)), ReminderAction::Remind);
+        let mut heard = ReminderPolicy::new(start, ReminderLimits::ANDROID);
+        heard.on_listeners(2, min(1));
+        assert_eq!(heard.decide(min(119)), ReminderAction::None, "a listener keeps it going");
+        assert_eq!(heard.decide(min(120)), ReminderAction::Remind, "2 h on air");
+        let mut left = ReminderPolicy::new(start, ReminderLimits::ANDROID);
+        left.on_listeners(1, min(1));
+        left.on_listeners(0, min(50));
+        assert_eq!(left.decide(min(79)), ReminderAction::None);
+        assert_eq!(left.decide(min(80)), ReminderAction::Remind, "30 min after the last listener left");
+    }
+    #[test]
+    fn holding_mute_talks_after_the_hold_time_and_a_short_press_stays_a_click() {
+        let mut h = HoldToTalk::default();
+        assert_eq!(h.frame(true, true, 0.0), HoldStep::default());
+        assert_eq!(h.frame(true, true, 0.2), HoldStep::default());
+        assert_eq!(h.frame(false, true, 0.25), HoldStep::default(), "a short press is an ordinary click");
+        assert_eq!(h.frame(true, true, 1.0).talk, None);
+        assert_eq!(h.frame(true, true, 1.35).talk, Some(true), "held long enough");
+        assert!(h.talking);
+        assert_eq!(h.frame(true, true, 5.0).talk, None, "talking until let go");
+        assert_eq!(h.frame(false, true, 5.1), HoldStep { talk: Some(false), swallow_click: true });
+        assert_eq!(h.frame(false, true, 5.2), HoldStep::default(), "the next click is a click again");
+        assert_eq!(h.frame(true, false, 6.0).talk, None);
+        assert_eq!(h.frame(true, false, 7.0).talk, None, "not muted: holding does nothing");
+    }
+    #[test]
+    fn the_live_timer_and_the_reminder_start_when_an_audio_broadcast_goes_live() {
+        let now = Instant::now();
+        let mut g = GoLiveModel { kind: LiveKind::AudioOnly, disclosed: true, ..GoLiveModel::default() };
+        assert!(g.start());
+        assert_eq!(g.elapsed(now), None);
+        g.on_at(LiveEvent::Started, now, ReminderLimits::ANDROID);
+        assert_eq!(g.elapsed(now + Duration::from_secs(65)), Some(65));
+        assert_eq!(live_timer(65), "1:05");
+        assert_eq!(live_timer(3_723), "1:02:03");
+        assert!(g.reminder.is_some());
+        g.stop();
+        assert_eq!((g.elapsed(now), g.reminder.is_some()), (None, false));
+        let mut video = GoLiveModel::default();
+        assert!(video.start());
+        video.on_at(LiveEvent::Started, now, ReminderLimits::ANDROID);
+        assert!(video.live_since.is_some() && video.reminder.is_none(), "video has a timer but no reminder");
+    }
+    #[test]
     fn switch_defaults_match_android() {
         let s = Switches::default();
-        assert!(s.generated_names && s.title_pages && s.names_before_answer);
-        assert!(!s.bvmid2 && !s.bvmid1_compat && !s.visible_by_name);
+        assert!(s.receive_calls, "Allow calls is on, as Android");
+        assert!(!s.block_unknown && !s.start_with_windows);
     }
 }

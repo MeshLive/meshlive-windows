@@ -19,7 +19,7 @@ Rules that apply to every test:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1 -Action Test -Configuration Release
 ```
 
-This runs about 600 tests, one at a time. They need no phone, camera, microphone, speaker or Bluetooth radio:
+This runs over 1,200 tests, one at a time. They need no phone, camera, microphone, speaker or Bluetooth radio:
 
 - **Protocol conformance** against frozen vectors from the Android app (`tests/fixtures/`, `tests/vectors/`): BMS1
   and BME1 records, BMH2 and BMH3 handshakes and key schedules, rotating IDs and openings, compact and manufacturer

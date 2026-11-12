@@ -163,7 +163,7 @@ impl Route {
     pub fn address_key(&self) -> u64 {
         self.address
     }
-    /// For the explicit, root-approved radio-check tool only: the received
+    /// For the explicit, approval-gated radio-check tool only: the received
     /// (usually random) address and its type. Never logged by the product.
     pub fn diagnostic_address(&self) -> (u64, i32) {
         (self.address, self.address_type.0)
@@ -369,6 +369,95 @@ impl Scanner {
     }
 }
 impl Drop for Scanner {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        let _ = self.watcher.Stop();
+        let _ = self.watcher.RemoveReceived(self.received_token);
+        let _ = self.watcher.RemoveStopped(self.stopped_token);
+    }
+}
+
+/// Design SR: a watcher for one derived service UUID (the renewal advert). It
+/// reports the first advertisement that lists the UUID and its address kind
+/// (from the address's two top bits); it proves no identity, and the address
+/// is only the routing hint for the connect.
+pub struct UuidScanner {
+    watcher: BluetoothLEAdvertisementWatcher,
+    received_token: i64,
+    stopped_token: i64,
+    receiver: Receiver<(Route, &'static str)>,
+    stopped: Arc<AtomicBool>,
+    failure: Arc<AtomicI32>,
+    _apartment: Apartment,
+}
+impl UuidScanner {
+    /// Explicit worker action; the same probe gate as every scan.
+    pub fn start(uuid: [u8; 16]) -> Result<Self, Error> {
+        let apartment = Apartment::new()?;
+        probe().require(false)?;
+        let watcher = BluetoothLEAdvertisementWatcher::new()?;
+        watcher.SetScanningMode(BluetoothLEScanningMode::Active)?;
+        let (sender, receiver) = sync_channel(1);
+        let stopped = Arc::new(AtomicBool::new(false));
+        let failure = Arc::new(AtomicI32::new(0));
+        let stop = stopped.clone();
+        let received_token = watcher.Received(&TypedEventHandler::<
+            BluetoothLEAdvertisementWatcher,
+            BluetoothLEAdvertisementReceivedEventArgs,
+        >::new(move |_, args| {
+            if stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let args = args.ok()?;
+            let ad = args.Advertisement()?;
+            let mut listed = false;
+            for service in &ad.ServiceUuids()? {
+                if service.to_u128().to_be_bytes() == uuid {
+                    listed = true;
+                    break;
+                }
+            }
+            if listed {
+                let address = args.BluetoothAddress()?;
+                let route = Route { address, address_type: args.BluetoothAddressType()? };
+                let _ = sender.try_send((route, crate::call_renewal::address_kind(address)));
+            }
+            Ok(())
+        }))?;
+        let stop = stopped.clone();
+        let error = failure.clone();
+        let stopped_token = match watcher.Stopped(&TypedEventHandler::<
+            BluetoothLEAdvertisementWatcher,
+            BluetoothLEAdvertisementWatcherStoppedEventArgs,
+        >::new(move |_, args| {
+            error.store(args.ok()?.Error()?.0, Ordering::Release);
+            stop.store(true, Ordering::Release);
+            Ok(())
+        })) {
+            Ok(token) => token,
+            Err(error) => {
+                let _ = watcher.RemoveReceived(received_token);
+                return Err(error.into());
+            }
+        };
+        let scanner = Self { watcher, received_token, stopped_token, receiver, stopped, failure, _apartment: apartment };
+        scanner.watcher.Start()?;
+        Ok(scanner)
+    }
+    /// The sighting, if there is one now; never blocks.
+    pub fn poll(&self) -> Result<Option<(Route, &'static str)>, Error> {
+        match self.receiver.try_recv() {
+            Ok(found) => return Ok(Some(found)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err(Error::Cancelled),
+        }
+        if self.stopped.load(Ordering::Acquire) {
+            return Err(Error::ScanStopped(self.failure.load(Ordering::Acquire)));
+        }
+        Ok(None)
+    }
+}
+impl Drop for UuidScanner {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::Release);
         let _ = self.watcher.Stop();

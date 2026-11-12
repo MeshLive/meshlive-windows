@@ -949,15 +949,16 @@ pub enum Tone {
     Verified,
 }
 
-/// A small status indicator: dot/glyph and a word, no box. Clickable (opens
-/// the status sheet); hover shows a raised pill.
-pub fn status_chip(ui: &mut Ui, text: &str, tone: Tone) -> Response {
-    let font = egui::FontId::new(14.0, theme::semibold_family());
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, theme::TEXT);
-    let size = vec2(galley.size().x + 12.0 + 8.0 + 24.0, 32.0);
+/// A small status indicator: a dot or glyph, and the word when `word` is
+/// Some (Android: all well is the dot alone; a problem adds its word when it
+/// fits beside the title). `a11y` is its accessible name either way.
+/// Clickable (opens the Status sheet); hover shows a raised pill.
+pub fn status_chip(ui: &mut Ui, word: Option<&str>, a11y: &str, tone: Tone) -> Response {
+    let galley = word.map(|w| ui.painter().layout_no_wrap(w.to_owned(), status_chip_font(), theme::TEXT));
+    let size = vec2(status_chip_width(ui, word), 32.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let enabled = response.enabled();
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, text));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, a11y));
     if response.hovered() {
         ui.painter().rect_filled(rect, radius(16.0), theme::RAISED);
     }
@@ -975,10 +976,24 @@ pub fn status_chip(ui: &mut Ui, text: &str, tone: Tone) -> Response {
         Tone::Problem => draw_icon(ui.painter(), Rect::from_center_size(mark, Vec2::splat(14.0)), Icon::Warning, theme::TEXT),
         Tone::Verified => draw_icon(ui.painter(), Rect::from_center_size(mark, Vec2::splat(14.0)), Icon::Verified, theme::POSITIVE),
     }
-    let ink = if tone == Tone::Ok { theme::TEXT_SECONDARY } else { theme::TEXT };
-    ui.painter().galley_with_override_text_color(egui::pos2(mark.x + 6.0 + 8.0, rect.center().y - galley.size().y * 0.5), galley, ink);
+    if let Some(galley) = galley {
+        let ink = if tone == Tone::Ok { theme::TEXT_SECONDARY } else { theme::TEXT };
+        ui.painter().galley_with_override_text_color(egui::pos2(mark.x + 6.0 + 8.0, rect.center().y - galley.size().y * 0.5), galley, ink);
+    }
     focus_ring(ui, &response, rect, 16.0);
     response
+}
+
+fn status_chip_font() -> egui::FontId {
+    egui::FontId::new(14.0, theme::semibold_family())
+}
+
+/// The width `status_chip` takes with this word (None: the dot alone).
+pub fn status_chip_width(ui: &Ui, word: Option<&str>) -> f32 {
+    match word {
+        Some(word) => ui.painter().layout_no_wrap(word.to_owned(), status_chip_font(), theme::TEXT).size().x + 12.0 + 8.0 + 24.0,
+        None => 36.0,
+    }
 }
 
 /// The red LIVE badge: white dot and text on a red capsule.
@@ -1084,6 +1099,39 @@ pub fn top_bar(ui: &mut Ui, title: &str, back: Option<&str>, trailing: impl FnOn
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), trailing);
     });
     went_back
+}
+
+/// A title row whose end is the status indicator (Android, 2026-11-04): the
+/// title is never cut for the indicator. The indicator shows its word only
+/// when the whole title and the word fit on one line, else the dot alone (a
+/// click still opens the sheet, which says it in full); the title is cut only
+/// when it alone is wider than the row beside the dot. Returns (Back used,
+/// the indicator's response).
+pub fn status_top_bar(ui: &mut Ui, title: &str, back: Option<&str>, word: Option<&str>, a11y: &str, tone: Tone) -> (bool, Option<Response>) {
+    let mut went_back = false;
+    let mut chip = None;
+    let width = ui.available_width();
+    ui.allocate_ui_with_layout(vec2(width, theme::TOP_BAR_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_size(vec2(width, theme::TOP_BAR_HEIGHT));
+        if let Some(name) = back {
+            went_back = icon_button(ui, Icon::Back, name, Kind::Quiet).clicked();
+            ui.add_space(4.0);
+        }
+        let font = if back.is_some() { Type::Headline } else { Type::Title };
+        let available = ui.available_width();
+        let gap = ui.spacing().item_spacing.x;
+        let whole = ui.painter().layout_no_wrap(title.to_owned(), font.font(), theme::TEXT).size().x;
+        let word = word.filter(|w| whole + gap + status_chip_width(ui, Some(w)) <= available);
+        let room = available - gap - status_chip_width(ui, word);
+        let galley = single_line(ui, title, font.font(), theme::TEXT, room);
+        let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, title));
+        ui.painter().galley(rect.min, galley, theme::TEXT);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            chip = Some(status_chip(ui, word, a11y, tone));
+        });
+    });
+    (went_back, chip)
 }
 
 /// A segmented control ("Nearby | Recent"). Returns true when it changed.

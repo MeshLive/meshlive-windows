@@ -584,11 +584,18 @@ pub struct Camera {
     source: IMFMediaSource,
     pub width: u32,
     pub height: u32,
+    /// How many video capture devices Windows listed when this one opened.
+    pub devices: usize,
     _apartment: Apartment,
 }
 impl Camera {
     /// The first video capture device, delivering NV12 at `width` x `height`.
     pub fn open_first(width: u32, height: u32) -> Result<Self, Error> {
+        Self::open_at(0, width, height)
+    }
+    /// The video capture device at `index` in Windows' order (the first one
+    /// when there are fewer), delivering NV12 at `width` x `height`.
+    pub fn open_at(index: usize, width: u32, height: u32) -> Result<Self, Error> {
         let apartment = Apartment::new()?;
         unsafe { MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET)? };
         let mut attributes = None;
@@ -602,7 +609,7 @@ impl Camera {
             return Err(Error::NoDevice);
         }
         let list = unsafe { std::slice::from_raw_parts_mut(devices, count as usize) };
-        let first = list[0].clone().ok_or(Error::NoDevice)?;
+        let first = list[if index < list.len() { index } else { 0 }].clone().ok_or(Error::NoDevice)?;
         for entry in list.iter_mut() {
             entry.take();
         }
@@ -620,7 +627,7 @@ impl Camera {
             media.SetUINT64(&MF_MT_FRAME_SIZE, (u64::from(width) << 32) | u64::from(height))?;
             reader.SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32, None, &media)?;
         }
-        Ok(Self { reader, source, width, height, _apartment: apartment })
+        Ok(Self { reader, source, width, height, devices: count as usize, _apartment: apartment })
     }
     /// The next picture as packed NV12 (`width * height * 3 / 2` bytes).
     pub fn next_frame(&mut self, deadline: Instant) -> Result<Vec<u8>, Error> {

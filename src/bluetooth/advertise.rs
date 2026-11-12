@@ -194,7 +194,8 @@ pub fn qw_form_switch(value: Option<&str>, compact_on: bool) -> bool {
 /// the PC's computer name (0x09) and Windows still sends a second, extended
 /// advert from another address. Never a default.
 pub fn compact_discoverable() -> bool {
-    std::env::var("MESHLIVE_COMPACT_DISCOVERABLE").ok().as_deref().map(str::trim) == Some("1")
+    // Puts the computer name on air: only a debug or test-hooks build reads it (SEC-13).
+    crate::control_arms::var("MESHLIVE_COMPACT_DISCOVERABLE").as_deref().map(str::trim) == Some("1")
 }
 
 /// The PC's Design QW call offer (9-byte payload) as the compact v2 call

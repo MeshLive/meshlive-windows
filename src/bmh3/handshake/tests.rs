@@ -767,6 +767,53 @@ fn android_fixture_transit_replay_and_reflection_negatives_fail_closed() {
     ));
 }
 #[test]
+fn a_link_handshake_tells_the_responder_about_the_initiators_wifi_marker() {
+    fn link_sessions(initiator_wifi: bool, responder_wifi: bool) -> (Session, Session) {
+        let root = vectors();
+        let v = &root["vectors"][0];
+        let ai = real(v, Role::Initiator);
+        let bi = real(v, Role::Responder);
+        let capabilities = caps(v, Role::Initiator);
+        let ac = Config::new(Purpose::Link, &ai, capabilities)
+            .unwrap()
+            .with_wifi(initiator_wifi);
+        let bc = Config::new(Purpose::Link, &bi, capabilities)
+            .unwrap()
+            .with_wifi(responder_wifi);
+        let (a, m1) = Waiting2::start(ac, InitiatorOptions::default()).unwrap();
+        let (b, m2) = Waiting3::respond(
+            bc,
+            &m1,
+            ResponderOptions {
+                discovery_epoch: Some(17),
+                ..Default::default()
+            },
+            &mut Guards::default(),
+        )
+        .unwrap();
+        let (progress, m3) = a.receive(&m2, |_| Ok(())).unwrap();
+        let (b, m4) = b.receive(&m3, |_, _| Ok(())).unwrap();
+        let a = match (progress, m4) {
+            (InitiatorProgress::Complete(session), None) => session,
+            (InitiatorProgress::Waiting4(waiting), Some(m4)) => {
+                waiting.receive(&m4, |_| Ok(())).unwrap()
+            }
+            _ => panic!("wrong order"),
+        };
+        (a, b)
+    }
+    let (a, b) = link_sessions(true, false);
+    assert!(b.peer().extensions().wifi);
+    assert!(!a.peer().extensions().wifi);
+    let (a, b) = link_sessions(false, false);
+    assert!(!b.peer().extensions().wifi);
+    assert!(!a.peer().extensions().wifi);
+    let (a, b) = link_sessions(false, true);
+    assert!(!a.peer().extensions().wifi);
+    assert!(!b.peer().extensions().wifi);
+}
+
+#[test]
 fn reflected_responder_block_resealed_under_the_right_key_and_stale_tags_fail() {
     let root = vectors();
     // 7b: the vector's responder block, re-sealed as msg3 under k_hs_i2r, fails
@@ -834,4 +881,56 @@ fn reflected_responder_block_resealed_under_the_right_key_and_stale_tags_fail() 
             assert_eq!(bi.calls.get(), 0);
         }
     }
+}
+
+/// WP6NF finding 10 (S10): after a real endpoint handshake, with and without
+/// throwaway keys, the key `dial::name_signer` picks from this side's own
+/// presentation signs a name the other side accepts from the peer it
+/// authenticated; the other key and another call ID are refused.
+#[test]
+fn the_name_is_signed_by_the_key_this_side_presented_in_a_real_handshake() {
+    let root = vectors();
+    let v = &root["vectors"][0];
+    let pseudo = &root["vectors"][3];
+    let ai = real(v, Role::Initiator);
+    let bi = real(v, Role::Responder);
+    let ap = presented_identity(pseudo, Role::Initiator);
+    let bp = presented_identity(pseudo, Role::Responder);
+    let caps = caps(v, Role::Initiator);
+    let call_id = [7u8; 16];
+    let accepted = |container: &[u8], node: &[u8; 16], id: &[u8; 16]| {
+        crate::labels::Inbox::default().accept(container, 0, node, crate::labels::BINDING_CALL, id) == vec![crate::labels::KIND_NAME]
+    };
+    crate::labels::set_own_name(Some("Asha".into()));
+    for pseudonyms in [false, true] {
+        let mut ac = Config::new(Purpose::Endpoint, &ai, caps).unwrap();
+        let mut bc = Config::new(Purpose::Endpoint, &bi, caps).unwrap();
+        if pseudonyms {
+            ac = ac.with_stranger(&ap, caps).unwrap();
+            bc = bc.with_stranger(&bp, caps).unwrap();
+        }
+        let (a, m1) = Waiting2::start(ac, InitiatorOptions::default()).unwrap();
+        let opts = ResponderOptions { mode: ResponderMode::Everyone, discovery_epoch: Some(17), ..Default::default() };
+        let mut guards = Guards::default();
+        let (b, m2) = Waiting3::respond(bc, &m1, opts, &mut guards).unwrap();
+        let (progress, m3) = a.receive(&m2, |_: &Peer| Ok::<(), Error>(())).unwrap();
+        let (b, m4) = b.receive(&m3, |_, _| Ok(())).unwrap();
+        let a = match (progress, m4) {
+            (InitiatorProgress::Complete(s), None) => s,
+            (InitiatorProgress::Waiting4(a), Some(m4)) => a.receive(&m4, |_: &Peer| Ok::<(), Error>(())).unwrap(),
+            _ => panic!("wrong order"),
+        };
+        // The caller's site: `name_signer(endpoint.own_pseudonym(), ..)`; the callee checks its peer.
+        let signed = crate::labels::own_call_container(crate::dial::name_signer(a.own_pseudonym(), &ap, &ai), &call_id).unwrap();
+        let wrong = crate::labels::own_call_container(crate::dial::name_signer(!a.own_pseudonym(), &ap, &ai), &call_id).unwrap();
+        assert!(accepted(&signed, b.peer().node_id(), &call_id), "pseudonyms={pseudonyms}");
+        assert!(!accepted(&wrong, b.peer().node_id(), &call_id), "the other key is refused");
+        assert!(!accepted(&signed, b.peer().node_id(), &[8u8; 16]), "another call ID is refused");
+        // The callee's site: `name_signer(answered.own_pseudonymous, listen.pseudonym, identity)`.
+        let signed = crate::labels::own_call_container(crate::dial::name_signer(b.own_pseudonym(), &bp, &bi), &call_id).unwrap();
+        let wrong = crate::labels::own_call_container(crate::dial::name_signer(!b.own_pseudonym(), &bp, &bi), &call_id).unwrap();
+        assert!(accepted(&signed, a.peer().node_id(), &call_id), "pseudonyms={pseudonyms}");
+        assert!(!accepted(&wrong, a.peer().node_id(), &call_id), "the other key is refused");
+    }
+    crate::labels::set_own_name(None);
 }

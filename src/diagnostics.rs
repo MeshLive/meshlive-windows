@@ -10,8 +10,14 @@ use std::path::{Path, PathBuf};
 
 pub const TRACE_LINES: usize = 400;
 
+/// The `=0` control arm puts raw traces and device descriptions back into the
+/// export, so only a debug or test-hooks build reads it (SEC-13).
 pub fn private_export_enabled() -> bool {
-    std::env::var("MESHLIVE_PRIVATE_DIAGNOSTICS").as_deref() != Ok("0")
+    private_export_from(meshlive::control_arms::var(PRIVATE_SWITCH).as_deref())
+}
+pub const PRIVATE_SWITCH: &str = "MESHLIVE_PRIVATE_DIAGNOSTICS";
+fn private_export_from(value: Option<&str>) -> bool {
+    value != Some("0")
 }
 
 /// The report text (pure apart from what it is given).
@@ -158,6 +164,30 @@ mod tests {
         let off = report("0.1.0", None, None, "Err(x)", &Switches::default(), &[]);
         assert!(off.contains("windows_build=unknown"));
         assert!(off.contains(if private_export_enabled() { "trace: omitted for privacy" } else { "trace: off" }));
+    }
+
+    /// SEC-13: a release build started with the export and capture-fence
+    /// control arms set exports privately and fences Mute, as with none.
+    /// Set only where the arms are unreadable (the release test run).
+    #[test]
+    fn with_the_control_arms_set_a_release_build_exports_privately_and_fences_mute() {
+        let input = "PRIVATE-CONTENT";
+        assert_eq!(report_with_privacy("0.1.0", None, Some(input), input, &Switches::default(), &[input.into()],
+            private_export_from(meshlive::control_arms::gated(false, PRIVATE_SWITCH, |_| Some("0".into())).as_deref())),
+            report_with_privacy("0.1.0", None, Some(input), input, &Switches::default(), &[input.into()], private_export_from(None)));
+        if meshlive::control_arms::READABLE {
+            return;
+        }
+        let keys = [PRIVATE_SWITCH, "MESHLIVE_CALL_CAPTURE_FENCE"];
+        let before: Vec<_> = keys.iter().map(|key| std::env::var_os(key)).collect();
+        for key in keys { unsafe { std::env::set_var(key, "0") }; }
+        let text = report("0.1.0", Some(26200), Some(input), input, &Switches::default(), &[input.into()]);
+        let fence = crate::radio_backend::call_capture_fence();
+        for (key, value) in keys.iter().zip(before) {
+            unsafe { match value { Some(value) => std::env::set_var(key, value), None => std::env::remove_var(key) } }
+        }
+        assert!(!text.contains(input), "trace and device descriptions stay out of the export");
+        assert!(fence.is_some(), "Mute still discards queued microphone audio");
     }
 
     #[test]

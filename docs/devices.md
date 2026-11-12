@@ -29,7 +29,7 @@ device-family policy registry. Each entry records its matcher, behaviour, source
 | --- | --- | --- | --- |
 | Intel USB Bluetooth adapters on Windows 11 24H2+ | USB vendor ID `8087`, Windows build 26100 or newer | Two Android raw observers: only the connectable extended advertisement carries the payload, every provider start uses a new random address, Windows rotates it after 15 minutes, and no address carried two payloads | One adapter measured; other Intel adapters inferred |
 
-On an adapter that is not listed, Settings > Calls explains why the PC does not announce itself, and calling out
+On an adapter that is not listed, the status (the dot at the top right) explains why the PC does not announce itself, and calling out
 still works. To measure a new family, a developer can set `MESHLIVE_QW_UNLISTED=1` (never for everyday use) and follow
 the on-air check in [testing](dev/testing.md#on-air-checks).
 

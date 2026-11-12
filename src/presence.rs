@@ -773,6 +773,20 @@ impl Vault {
         self.retry_at = None;
         true
     }
+    /// Android `resetKey` ("Reset private ID", Settings > Privacy): a damaged
+    /// store is deleted (the floor is raised first, so the next load starts a
+    /// new generation); every other state takes a revocation (`bump`): a new
+    /// generation and a whole new window now, contacts kept. Contacts' leases
+    /// of the old generation stop matching; they recognise this PC again
+    /// after the next verified call delivers a new lease. False only when a
+    /// damaged file could not be removed.
+    pub fn reset_key(&mut self, epoch: u32) -> bool {
+        if self.damaged {
+            self.floor.raise_to(self.floor.get().saturating_add(1));
+            return self.reset_damaged();
+        }
+        self.bump(epoch)
+    }
     fn transient_failure(&mut self) {
         self.failures = self.failures.saturating_add(1);
         let wait = (2u64 << (self.failures - 1).min(5)).min(60);
@@ -997,6 +1011,28 @@ impl Vault {
         self.mutate(|s| s.contact_mut(node_id).visible_to_them = visible);
         revoke && self.bump(epoch)
     }
+    /// Android `revokeForBlocked` (PersonPolicy.onBlocked): a blocked contact
+    /// that holds this PC's lease of the current generation stops recognising
+    /// it ("Can see when I'm nearby" off, which starts a new generation now);
+    /// without such a delivery nothing changes. While the store can't be read,
+    /// `fail_closed` (a block made now) raises the generation floor so the
+    /// next load starts a new generation; the start-up reconcile passes false
+    /// (no new generation at every start). True when a revocation happened.
+    pub fn revoke_for_blocked(&mut self, node_id: &[u8; 16], epoch: u32, fail_closed: bool) -> bool {
+        let Some(state) = &self.state else {
+            if fail_closed {
+                self.floor.raise_to(self.floor.get().saturating_add(1));
+            }
+            return fail_closed;
+        };
+        let Some(existing) = state.contacts.iter().find(|c| &c.node_id == node_id) else {
+            return false;
+        };
+        if existing.delivered_generation != state.generation {
+            return false;
+        }
+        self.set_visible(node_id, false, epoch)
+    }
     /// The recognition table of every contact that gave this PC a lease.
     pub fn recognition(&self, my_epoch: u32, now_ms: i64) -> RecognitionTable {
         self.state.as_ref().map_or_else(RecognitionTable::default, |s| s.recognition(my_epoch, now_ms))
@@ -1043,6 +1079,17 @@ impl Vault {
         }
         out
     }
+    /// The contacts a sighted rotating stream offer belongs to (role 1 hits
+    /// only; the Live list hides a blocked contact's streams).
+    pub fn recognise_stream_offer(&self, rdi: &[u8; 6], my_epoch: u32, now_ms: i64) -> Vec<[u8; 16]> {
+        let mut out: Vec<[u8; 16]> = Vec::new();
+        for hit in &self.lookup(rdi, my_epoch, now_ms) {
+            if hit.role == ROLE_STREAM_OFFER && !out.contains(&hit.contact) {
+                out.push(hit.contact);
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -1067,6 +1114,41 @@ mod tests {
         assert_eq!(vault.problem(), None);
         assert!(!vault.reset_damaged(), "a healthy store is never deleted");
         assert!(file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// "Reset private ID" on a healthy store: a new generation and a whole new
+    /// window, saved; contacts stay. On a damaged one: the file goes and a new
+    /// store loads.
+    #[test]
+    fn reset_key_starts_a_new_window_and_keeps_contacts() {
+        let dir = crate::sealed::tests::scratch("vault-reset-key");
+        let mut vault = Vault::new(PresenceStore::new(&dir, Box::new(crate::sealed::tests::Plain)), Box::new(MemoryFloor(0)));
+        assert!(vault.ensure_loaded(EPOCH));
+        let node = [7u8; 16];
+        let window = roll(&BTreeMap::new(), EPOCH, &mut random_key);
+        assert!(vault.store_lease(&node, &Lease::delivery(&window, 1, EPOCH).unwrap(), EPOCH, 1_000));
+        let before = vault.state().unwrap().clone();
+        assert!(vault.reset_key(EPOCH));
+        let after = vault.state().unwrap().clone();
+        assert!(after.generation > before.generation, "a new generation");
+        assert!(after.keys.values().all(|k| !before.keys.values().any(|old| old == k)), "a whole new window");
+        assert!(after.contacts.iter().any(|c| c.node_id == node), "contacts and their leases stay");
+        let mut again = Vault::new(PresenceStore::new(&dir, Box::new(crate::sealed::tests::Plain)), Box::new(MemoryFloor(after.generation)));
+        assert!(again.ensure_loaded(EPOCH));
+        assert_eq!(again.state().unwrap().generation, after.generation, "saved");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = crate::sealed::tests::scratch("vault-reset-key-damaged");
+        let file = dir.join("identity-verification").join("presence-leases.bin");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"not a sealed store").unwrap();
+        let mut vault = Vault::new(PresenceStore::new(&dir, Box::new(crate::sealed::tests::Plain)), Box::new(MemoryFloor(0)));
+        assert!(!vault.ensure_loaded(EPOCH));
+        assert!(vault.reset_key(EPOCH));
+        assert!(!file.exists(), "the damaged file is gone");
+        assert!(vault.ensure_loaded(EPOCH), "a new store after the reset");
+        assert!(vault.state().unwrap().generation >= 2, "above the raised floor");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1119,6 +1201,62 @@ mod tests {
         assert_eq!(vault.recognise_call_offer(&rdi(EPOCH + 5), EPOCH, 1_000 + STALE_SKEW_MS + 1), vec![node], "a stale lease widens the table");
         assert!(!vault.forget(&node, EPOCH), "no delivery, so no revocation");
         assert!(vault.recognise_call_offer(&rdi(EPOCH), EPOCH, 2_000).is_empty(), "forget rebuilds");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Blocking a contact that holds this PC's current lease revokes it and
+    /// keeps it from a new one; a contact without that delivery is left alone;
+    /// turning "Can see when I'm nearby" back on (the unblock) lets the next
+    /// call deliver again. An unreadable store revokes only when a block is
+    /// made now, and the next load is a new generation.
+    #[test]
+    fn blocking_a_contact_revokes_its_lease_and_unblocking_lets_a_call_deliver_again() {
+        let dir = crate::sealed::tests::scratch("vault-blocked");
+        let mut vault = Vault::new(PresenceStore::new(&dir, Box::new(crate::sealed::tests::Plain)), Box::new(MemoryFloor(0)));
+        assert!(vault.ensure_loaded(EPOCH));
+        let (asha, ravi) = ([7u8; 16], [8u8; 16]);
+        assert!(vault.deliver_lease(&asha, EPOCH, || true).is_some());
+        let before = vault.state().unwrap().generation;
+        assert!(!vault.revoke_for_blocked(&ravi, EPOCH, true), "no record: nothing to revoke");
+        assert_eq!(vault.state().unwrap().generation, before);
+        assert!(vault.revoke_for_blocked(&asha, EPOCH, true));
+        assert!(vault.state().unwrap().generation > before, "a new generation");
+        assert!(!vault.visible_to_them(&asha));
+        assert!(vault.deliver_lease(&asha, EPOCH, || true).is_none(), "no new lease while blocked");
+        assert!(!vault.revoke_for_blocked(&asha, EPOCH, true), "the old delivery is no longer current");
+        vault.set_visible(&asha, true, EPOCH);
+        assert!(vault.deliver_lease(&asha, EPOCH, || true).is_some(), "after the unblock a call delivers again");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = crate::sealed::tests::scratch("vault-blocked-damaged");
+        let file = dir.join("identity-verification").join("presence-leases.bin");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"not a sealed store").unwrap();
+        let mut vault = Vault::new(PresenceStore::new(&dir, Box::new(crate::sealed::tests::Plain)), Box::new(MemoryFloor(0)));
+        assert!(!vault.ensure_loaded(EPOCH));
+        assert!(!vault.revoke_for_blocked(&asha, EPOCH, false), "the start-up reconcile changes nothing");
+        assert!(vault.revoke_for_blocked(&asha, EPOCH, true), "a block now fails closed");
+        assert!(vault.reset_damaged());
+        assert!(vault.ensure_loaded(EPOCH));
+        assert!(vault.state().unwrap().generation >= 2, "above the raised floor");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A contact's stream offer is recognised by its role 1 ID only; its call
+    /// offer is not a stream and a stream ID is not a call offer.
+    #[test]
+    fn a_contacts_stream_offer_is_recognised_by_its_stream_id_only() {
+        let dir = crate::sealed::tests::scratch("vault-stream-offer");
+        let mut vault = Vault::new(PresenceStore::new(&dir, Box::new(crate::sealed::tests::Plain)), Box::new(MemoryFloor(0)));
+        assert!(vault.ensure_loaded(EPOCH));
+        let node = [7u8; 16];
+        let window = roll(&BTreeMap::new(), EPOCH, &mut random_key);
+        assert!(vault.store_lease(&node, &Lease::delivery(&window, 1, EPOCH).unwrap(), EPOCH, 1_000));
+        let stream = own_rdi(&window, &node, EPOCH, ROLE_STREAM_OFFER).unwrap();
+        let call = own_rdi(&window, &node, EPOCH, ROLE_CALL_OFFER).unwrap();
+        assert_eq!(vault.recognise_stream_offer(&stream, EPOCH, 1_000), vec![node]);
+        assert!(vault.recognise_stream_offer(&call, EPOCH, 1_000).is_empty(), "a call offer is not a stream");
+        assert!(vault.recognise_call_offer(&stream, EPOCH, 1_000).is_empty(), "a stream is not a call offer");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

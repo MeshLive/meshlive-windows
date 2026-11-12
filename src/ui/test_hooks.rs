@@ -159,6 +159,7 @@ impl Ui {
                     contact: None,
                     fingerprint: (!outgoing).then_some([7; 32]),
                     blocked: false,
+                    declined_at: None,
                 });
             }
             return;

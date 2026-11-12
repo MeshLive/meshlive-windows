@@ -350,7 +350,7 @@ impl Bits {
 
 /// Rule 6. H.264: the larger coded side against the larger header side and
 /// the smaller against the smaller (either orientation), each header side
-/// rounded up to a multiple of 16. HEVC (root decision 2026-10-28, after
+/// rounded up to a multiple of 16. HEVC (design decision 2026-10-28, after
 /// NVIDIA's HEVC MFT padded 426x240 to 448x256): the cropped
 /// (conformance-window) size fits the header with the same orientation
 /// handling (smaller ladder rungs under a maximum-size header stay valid),

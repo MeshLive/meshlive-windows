@@ -5,7 +5,7 @@ const EPOCH: u32 = 1_990_656;
 fn handshake(purpose: Purpose, caps: Capabilities, opening: Option<Vec<u8>>, check: impl FnOnce(&Peer) -> Result<(), bmh3::Error>) -> Result<(Session, Session), bmh3::Error> {
     let (answerer, caller, _) = identities();
     let throwaway = Identity::ephemeral().unwrap();
-    let config = stranger_config(purpose, &caller, &throwaway, Capabilities { transport: 4, ..caps })?;
+    let config = stranger_config(purpose, &caller, &throwaway, Capabilities { transport: 4, ..caps }, false)?;
     let (waiting, m1) = Waiting2::start(config, InitiatorOptions::default())?;
     let (answer, m2) = Waiting3::respond(Config::new(purpose, &answerer, caps)?, &m1,
         ResponderOptions { opening, ..Default::default() }, &mut Guards::default())?;

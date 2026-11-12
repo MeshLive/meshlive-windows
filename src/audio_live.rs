@@ -170,6 +170,17 @@ impl VerifiedHeader {
     }
 }
 
+/// The level meter (Android `AudioLiveLevel.rms`): 0..1 for one PCM frame,
+/// its RMS against about -24 dBFS full scale, so ordinary speech moves the
+/// meter across most of its range.
+pub fn level(pcm: &[i16]) -> f32 {
+    if pcm.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = pcm.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+    ((sum / pcm.len() as f64).sqrt() / 4_000.0).clamp(0.0, 1.0) as f32
+}
+
 pub fn single_20ms_mono(unit: &[u8]) -> bool {
     if unit.is_empty() || unit.len() > 1275 {
         return false;
@@ -686,5 +697,15 @@ mod tests {
             g.open(&signed(21, 72, 8_400_000, &full), 1000),
             Err(Error::Budget)
         ));
+    }
+
+    #[test]
+    fn the_level_meter_is_silent_for_silence_and_full_for_loud_speech() {
+        assert_eq!(level(&[]), 0.0);
+        assert_eq!(level(&[0; 960]), 0.0);
+        let quiet = level(&[400; 960]);
+        assert!(quiet > 0.05 && quiet < 0.2, "{quiet}");
+        assert_eq!(level(&[-12_000; 960]), 1.0, "loud input fills the meter");
+        assert!(level(&[2_000, -2_000].repeat(480)) > quiet, "louder moves it further");
     }
 }

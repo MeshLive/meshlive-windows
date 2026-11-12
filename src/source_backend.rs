@@ -8,7 +8,7 @@ use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::{self
 /// Android's BluetoothVideoBroadcaster.CONNECTION_TIMEOUT_MS: one viewer's connect and handshake.
 const ADMISSION_BUDGET: Duration = Duration::from_secs(12);
 
-pub enum Control { Pause(bool), Mute(bool), Camera(bool) }
+pub enum Control { Pause(bool), Mute(bool), Camera(bool), Flip }
 pub struct Task { quit: Arc<AtomicBool>, dial_cancel: Arc<AtomicBool>, dialing: Arc<AtomicBool>, controls: Sender<Control>, thread: Option<JoinHandle<()>> }
 impl Task {
     pub fn start(dir: PathBuf, kind: LiveKind, title: String, settings: Settings, initial: stream_source::InitialMedia, out: Sender<Update>) -> Self {
@@ -146,6 +146,8 @@ fn run(dir: PathBuf, radio: bool, title: String, settings: Settings, initial: st
     let mut capture_fence = stream_source::CaptureFence::default();
     let mut capture = stream_source::CaptureLifecycle::new(radio);
     let mut audio_pts = 0; let mut next_picture = Instant::now();
+    // The audio-only screen's level meter, about ten times a second.
+    let mut level_at = Instant::now();
     let mut requests = meshlive::viewer_admission::Requests::default(); let mut full = false; let mut window = stream_source::OfferWindow::default(); let mut ended = None;
     let fresh_end_clock = std::env::var("MESHLIVE_SOURCE_END_CLOCK").as_deref() == Ok("1");
     let ready_writes = std::env::var("MESHLIVE_SOURCE_READY_WRITES").as_deref() == Ok("1");
@@ -175,6 +177,7 @@ fn run(dir: PathBuf, radio: bool, title: String, settings: Settings, initial: st
                         if !radio { source.mute_audio(value, ns); } else if value { source.discard_radio_audio(); }
                         if media_notices { source.set_media_state(muted, !camera_on, ns); }
                     }
+                    Control::Flip => { if let Some(camera) = camera.as_ref() { camera.switch_camera(); } }
                     Control::Camera(value) => { camera_on = value; camera = None; if !value && camera_fence { encoder = None; source.discard_video(); } if value && !paused && !radio { if !generated_video { camera = Some(meshlive::call_camera::CallCamera::start(settings.width, settings.height)); } if let Some(e) = encoder.as_mut() { e.request_keyframe(ns, true); } } if media_notices { source.set_media_state(muted, !camera_on, ns); } }
                     _ => {}
                 }
@@ -196,6 +199,10 @@ fn run(dir: PathBuf, radio: bool, title: String, settings: Settings, initial: st
                         meshlive::call_audio::Event::Frame(mut pcm) if capture.running() => {
                             #[cfg(test)] { capture_frames += 1; }
                             capture_fence.scrub(muted, &mut pcm[..]);
+                            if radio && level_at.elapsed() >= Duration::from_millis(100) {
+                                level_at = Instant::now();
+                                let _ = out.send(Update::LiveLevel(if muted { 0.0 } else { meshlive::audio_live::level(&pcm[..]) }));
+                            }
                             let unit = opus.encode(&pcm).map_err(debug)?;
                             if let Some(signer) = signer.as_mut() {
                                 let batch = if single_radio { Some(Packet { flags: media::AUDIO, pts_us: audio_pts, payload: &unit }.encode().map_err(debug)?) }
@@ -220,7 +227,13 @@ fn run(dir: PathBuf, radio: bool, title: String, settings: Settings, initial: st
                 #[cfg(test)] eprintln!("PHONE_CHECK audio_live_shed removed={shed}");
             }
             if let Some(camera) = camera.as_ref() {
-                for event in camera.events() { if let meshlive::call_camera::Event::Unavailable(reason) = event { return Err(reason); } }
+                for event in camera.events() {
+                    match event {
+                        meshlive::call_camera::Event::Unavailable(reason) => return Err(reason),
+                        meshlive::call_camera::Event::Cameras(count) => { let _ = out.send(Update::Cameras(count)); }
+                        meshlive::call_camera::Event::On => {}
+                    }
+                }
             }
             if !radio && !paused && camera_on && now >= next_picture {
                     let picture = camera.as_ref().and_then(|camera| camera.latest());

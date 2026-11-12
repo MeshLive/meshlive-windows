@@ -2,7 +2,8 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File packaging\make_zip.ps1 [-Exe <release meshlive.exe>] [-OutputPath <new folder>]
 # Contents: meshlive.exe (icon and version embedded), the user guide, privacy,
 # LICENSE, THIRD_PARTY_NOTICES; SHA256SUMS next to the zip covers the zip and
-# every file in it. Refuses a test-hooks build.
+# every file in it. Refuses a test-hooks build and any build that reads the
+# protection-off control arms (Assert-ReleaseExe.ps1).
 [CmdletBinding()]
 param(
     [string]$Exe = "",
@@ -12,7 +13,8 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $Exe) { $Exe = Join-Path $repo '.artifacts\cargo\x86_64-pc-windows-msvc\release\meshlive.exe' }
 if (-not (Test-Path -LiteralPath $Exe)) { throw "meshlive.exe not found: $Exe" }
-if (Select-String -LiteralPath $Exe -Pattern 'MESHLIVE_TEST_DIAL' -SimpleMatch -Quiet) { throw 'This meshlive.exe contains the test hooks; zip a release build.' }
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Assert-ReleaseExe.ps1') -Exe $Exe
+if ($LASTEXITCODE -ne 0) { throw "Refused: $Exe is not a release build (see the message above)." }
 $version = (Select-String -LiteralPath (Join-Path $repo 'Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 if (-not $OutputPath) { $OutputPath = Join-Path $repo ".artifacts\release\zip-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
 $out = [IO.Path]::GetFullPath($OutputPath)

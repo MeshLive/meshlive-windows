@@ -97,7 +97,10 @@ pub struct Extensions {
     pub intent: Option<u8>,
     pub build_tag: Option<BuildTag>,
     pub pseudonym: bool,
+    /// The initiator's link block carried `WIFI` version 1 (this PC implements `BWF1`).
+    pub wifi: bool,
     build_tag_seen: bool,
+    wifi_seen: bool,
 }
 fn opening_valid(value: &[u8]) -> bool {
     !value.is_empty() && value[0] <= 2 && value.len() == 1 + 43 * value[0] as usize
@@ -126,6 +129,9 @@ impl Extensions {
         }
         if self.pseudonym {
             body.extend_from_slice(&[4, 0, 0]);
+        }
+        if self.wifi {
+            body.extend_from_slice(&[8, 0, 1, 1]);
         }
         let spare = EXTENSION_BYTES
             .checked_sub(body.len())
@@ -174,6 +180,11 @@ impl Extensions {
                 }
                 4 if value.is_empty() => result.pseudonym = true,
                 0..=4 | 0x80..=0xff => return Err(Error::Extensions),
+                8 if value.len() == 1 => {
+                    result.wifi_seen = true;
+                    result.wifi = value[0] == 1;
+                }
+                8 => return Err(Error::Extensions),
                 _ => {}
             }
         }
@@ -188,6 +199,10 @@ impl Extensions {
         order: Order,
     ) -> Result<(), Error> {
         if (self.build_tag_seen || self.build_tag.is_some()) && purpose != Purpose::Link
+            || (self.wifi_seen || self.wifi)
+                && (purpose != Purpose::Link
+                    || role != Role::Initiator
+                    || message != 3)
             || self.opening.is_some() && (role != Role::Responder || self.pseudonym)
             || self.intent.is_some()
                 && (role != Role::Initiator || message != 3 || order != Order::InitiatorFirst)

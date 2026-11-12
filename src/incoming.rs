@@ -87,6 +87,13 @@ pub struct Listener<'a> {
     pub epoch: u32,
 }
 
+/// Design SR on the responder: both end-to-end hellos signed bit 4 and this is
+/// a call. The link a verification code opened (`TagOwner::Code`) never holds
+/// `K_renew`, whatever the hellos say.
+fn renewal_for(switch: bool, link_tag: Option<TagOwner>, own_transport: u8, peer_transport: u8) -> bool {
+    link_tag != Some(TagOwner::Code) && crate::call_renewal::negotiated(switch, own_transport, peer_transport)
+}
+
 /// An authenticated incoming link, ready for the caller's Invite.
 pub struct Answered {
     pub link: CallLink,
@@ -108,6 +115,14 @@ pub struct Answered {
     /// The end-to-end exporter (REVEAL binding).
     pub exporter: [u8; 32],
     pub buffer: Vec<u8>,
+    /// This link negotiated `BWF1` (the initiator's `WIFI` marker and this build implements it).
+    pub wifi: bool,
+}
+
+/// A responder opts a call into `BWF1` only when this build implements it and
+/// the initiator's verified link block carried the `WIFI` marker.
+pub fn responder_wifi(implemented: bool, marker: bool) -> bool {
+    implemented && marker
 }
 
 fn pull<C: Carrier>(carrier: &mut C, buffer: &mut Vec<u8>, stage: Stage, deadline: Instant, cancelled: &AtomicBool) -> Result<(), Error> {
@@ -229,8 +244,10 @@ pub fn respond<C: Carrier>(
         link.peer().extensions().pseudonym,
     );
     trace("callee_link_done", &format!("tagged={} bdo1={opening_exchange}", link_tag.is_some()));
+    let wifi = responder_wifi(crate::wifi::implemented(), link.peer().extensions().wifi);
     let policy = Policy {
         require_opening: opening_exchange,
+        wifi,
         ..Policy::default()
     };
     let mut hop_out = Sealer::new(Layer::Hop, link.keys().send_key(), policy).map_err(at(Stage::Link))?;
@@ -264,7 +281,10 @@ pub fn respond<C: Carrier>(
     }
     // The endpoint hello offers call video fragments (bit 7, CF-MEDIA-76).
     let endpoint_caps = crate::video::hello_codecs(Capabilities {
-        transport: crate::call::fragments::endpoint_transport(CAPABILITIES.transport) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
+        transport: crate::call_renewal::transport(
+            crate::call::fragments::endpoint_transport(CAPABILITIES.transport) | if crate::labels::enabled() { crate::labels::CAPABILITY_BIT } else { 0 },
+            crate::call_renewal::enabled(),
+        ),
         // The decoders this PC really has (CF-HS-02), not a constant; Design
         // HC's masks (with bit 4) through `hello_codecs`.
         decode_codecs: crate::video::decode_mask(),
@@ -331,19 +351,9 @@ pub fn respond<C: Carrier>(
         "callee_endpoint_done",
         &format!("pseudonymous_peer={} own_pseudonym={} negotiated={negotiated}", peer.extensions().pseudonym, endpoint.own_pseudonym()),
     );
-    let answered = Answered {
-        peer: *peer.public_key(),
-        peer_node: *peer.node_id(),
-        peer_fingerprint: *peer.fingerprint(),
-        peer_pseudonymous: peer.extensions().pseudonym,
-        own_pseudonymous: endpoint.own_pseudonym(),
-        tag: link_tag,
-        negotiated,
-        peer_decode_codecs: peer.capabilities().decode_codecs,
-        peer_capabilities: peer.capabilities(),
-        relayed: *peer.public_key() != link_peer,
-        exporter: *endpoint.keys().exporter(),
-        link: CallLink::continue_link_with(
+    let answered = {
+        let relay_edge = *peer.public_key() != link_peer;
+        let mut call_link = CallLink::continue_link_with(
             hop_out,
             hop_in,
             endpoint.keys().send_key(),
@@ -352,8 +362,35 @@ pub fn respond<C: Carrier>(
             negotiated,
             crate::labels::enabled() && peer.capabilities().transport & crate::labels::CAPABILITY_BIT != 0,
         )
-            .map_err(at(Stage::Call))?,
-        buffer,
+        .map_err(at(Stage::Call))?;
+        if wifi {
+            call_link
+                .enable_wifi(endpoint.keys().exporter(), false, relay_edge)
+                .map_err(at(Stage::Call))?;
+        }
+        if renewal_for(crate::call_renewal::enabled(), link_tag, endpoint_caps.transport, peer.capabilities().transport) {
+            // A relayed call that both signed derives the key so it can answer
+            // REFUSED not direct; `direct` is the checked link-peer fact.
+            call_link
+                .enable_renewal(endpoint.keys().send_key(), endpoint.keys().receive_key(), !relay_edge)
+                .map_err(at(Stage::Call))?;
+        }
+        Answered {
+            peer: *peer.public_key(),
+            peer_node: *peer.node_id(),
+            peer_fingerprint: *peer.fingerprint(),
+            peer_pseudonymous: peer.extensions().pseudonym,
+            own_pseudonymous: endpoint.own_pseudonym(),
+            tag: link_tag,
+            negotiated,
+            peer_decode_codecs: peer.capabilities().decode_codecs,
+            peer_capabilities: peer.capabilities(),
+            relayed: relay_edge,
+            exporter: *endpoint.keys().exporter(),
+            link: call_link,
+            buffer,
+            wifi,
+        }
     };
     Ok(answered)
 }

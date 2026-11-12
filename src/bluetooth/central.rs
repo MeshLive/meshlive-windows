@@ -406,7 +406,7 @@ impl Central {
         );
         events.watch(&session);
         io.session = Some(session);
-        // Measured on three phones (win-userflow-20261019): MaintainConnection
+        // Measured on three phones (phone runs of 2026-10-19): MaintainConnection
         // alone did not open the link; the session went Active only after
         // the first GATT request (A15s: at 14.3 s, right after the 12 s idle
         // wait ended; ASUS: the request at 12 s came too late for the budget).
@@ -835,6 +835,10 @@ impl Central {
     pub fn read(&self, output: &mut [u8], deadline: Instant) -> Result<usize, carrier::Error> {
         self.io.pipe.read(output, deadline, &self.io.cancelled.requested)
     }
+    /// WP6NH: the call's peer is blocked: no more GR1 resends.
+    pub fn fence_recovery(&mut self) {
+        self.writer.fence_recovery(&self.io);
+    }
     pub fn write(&mut self, bytes: &[u8], deadline: Instant) -> Result<(), carrier::Error> {
         let cancelled = self.io.cancelled.requested.clone();
         self.writer.write(bytes, &mut self.io, deadline, &cancelled)
@@ -903,6 +907,11 @@ impl LinkIo for CentralIo {
             if value.len() > self.capacity().map_err(|_| Error::Unsupported)? {
                 return Err(Error::Unsupported);
             }
+            if tx_blackhole(self.started.elapsed()) {
+                // Test hook: the write "succeeds" and goes nowhere, as after the
+                // 2026-11 Samsung case (the phone's stack gave up this link's writes).
+                return Ok(());
+            }
             let status = wait_with(
                 self.write
                     .as_ref()
@@ -932,6 +941,27 @@ impl LinkIo for CentralIo {
         self.cancelled.stop();
         self.pipe.abort(carrier::Error::Backend);
         self.disconnect();
+    }
+}
+
+/// Test hooks only: `MESHLIVE_TEST_TX_BLACKHOLE_S=<5..300>`: from that many
+/// seconds after this central link opened, every write is reported as sent
+/// and dropped. It mimics a phone whose Bluetooth stack gave up this PC's
+/// writes while its own notifications kept coming (the 2026-11 Windows ->
+/// Samsung stall), so `peer_rx_stalled` can be checked on a phone.
+fn tx_blackhole(since_open: Duration) -> bool {
+    #[cfg(feature = "test-hooks")]
+    {
+        std::env::var("MESHLIVE_TEST_TX_BLACKHOLE_S")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|s| (5..=300).contains(s))
+            .is_some_and(|s| since_open >= Duration::from_secs(s))
+    }
+    #[cfg(not(feature = "test-hooks"))]
+    {
+        let _ = since_open;
+        false
     }
 }
 

@@ -13,7 +13,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows::{
     Data::Xml::Dom::XmlDocument,
-    UI::Notifications::{ToastNotification, ToastNotificationManager},
+    UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager},
     core::HSTRING,
 };
 
@@ -148,14 +148,45 @@ pub fn ring_allowed(attention: Attention) -> bool {
     !matches!(attention, Attention::Quiet | Attention::Presenting)
 }
 
+/// Windows won't show this app's toasts: the user or a policy turned them
+/// off, or (tester zip) there is no Start-menu shortcut, so the notifier
+/// can't be made. An incoming call then shows only in the window and as a
+/// flashing taskbar button (the Status sheet says so). Review builds: false.
+pub fn toasts_blocked() -> bool {
+    if meshlive::app_mode::current().is_review() {
+        return false;
+    }
+    let notifier = if UNPACKAGED.load(Ordering::Relaxed) {
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))
+    } else {
+        ToastNotificationManager::CreateToastNotifier()
+    };
+    !matches!(notifier.and_then(|notifier| notifier.Setting()), Ok(NotificationSetting::Enabled))
+}
+
 pub fn incoming_call(peer: &str, video: bool) -> Result<(), String> {
     // Review builds keep the in-app ring/attention without the installed app's toast identity.
     if meshlive::app_mode::current().is_review() { return Ok(()); }
     let (title, body) = toast_text(attention(), peer, video);
-    let xml_text = toast_xml(&title, body.as_deref());
+    show_toast(&toast_xml(&title, body.as_deref()))
+}
+
+/// Android's "Still broadcasting" notification for an audio broadcast that
+/// may have been forgotten (it names no one).
+pub fn live_reminder() -> Result<(), String> {
+    if meshlive::app_mode::current().is_review() { return Ok(()); }
+    let xml = format!(
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        escape("Still broadcasting"),
+        escape("Your audio broadcast is still on. Open MeshLive to keep it on, or stop it.")
+    );
+    show_toast(&xml)
+}
+
+fn show_toast(xml_text: &str) -> Result<(), String> {
     let show = || -> windows::core::Result<()> {
         let xml = XmlDocument::new()?;
-        xml.LoadXml(&HSTRING::from(xml_text.as_str()))?;
+        xml.LoadXml(&HSTRING::from(xml_text))?;
         let toast = ToastNotification::CreateToastNotification(&xml)?;
         let notifier = if UNPACKAGED.load(Ordering::Relaxed) {
             ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?

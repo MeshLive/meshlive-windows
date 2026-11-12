@@ -150,8 +150,8 @@ impl Rig {
             Person { id: 11, name: "Blue Otter".into(), reach: Reach::Via(2), verified: false, copied: false },
         ]));
         self.send(Update::Contacts(vec![
-            Contact { id: 10, name: "Priya".into(), by_qr: true, nearby: true, lease: true, blocked: false },
-            Contact { id: 12, name: "Ravi".into(), by_qr: false, nearby: false, lease: true, blocked: false },
+            Contact { id: 10, name: "Priya".into(), by_qr: true, nearby: true, lease: true, blocked: false, ..Default::default() },
+            Contact { id: 12, name: "Ravi".into(), by_qr: false, nearby: false, lease: true, blocked: false, ..Default::default() },
         ]));
         self.ui.pump();
     }
@@ -206,6 +206,15 @@ impl Rig {
     }
     fn contains(&mut self, text: &str) -> bool {
         self.texts().iter().any(|t| t.contains(text))
+    }
+    /// Text this frame painted, including a ListRow's subtitle (AccessKit
+    /// names do not carry it).
+    fn painted(&mut self, text: &str) -> bool {
+        let output = self.frame(vec![]);
+        output.shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Text(shape) => shape.galley.text().contains(text),
+            _ => false,
+        })
     }
     /// A real pointer click on the control with this exact accessible name.
     fn click(&mut self, label: &str) {
@@ -322,20 +331,26 @@ fn keyboard_navigation_switches_pages_and_the_go_live_footer_stays_visible() {
     assert!(footer.center.unwrap().y < 720.0);
 }
 
-/// Enter is the welcome's default button, wherever the focus is.
+/// Enter is the welcome's main button on every page, wherever the focus is:
+/// four presses pass the four pages (Allow on Start with Windows).
 #[test]
 fn enter_starts_from_the_welcome() {
     let mut rig = Rig::full();
     rig.ui.switches.onboarded = false;
     let _ = rig.frame(vec![]);
-    let _ = rig.frame(vec![egui::Event::Key {
-        key: egui::Key::Enter,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: Default::default(),
-    }]);
+    for _ in 0..4 {
+        assert!(!rig.ui.switches.onboarded);
+        let _ = rig.frame(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }]);
+        let _ = rig.frame(vec![]);
+    }
     assert!(rig.ui.switches.onboarded);
+    assert!(rig.ui.switches.start_with_windows, "Enter on Start with Windows is Allow");
 }
 
 /// Add contact stays pinned in view however long the contact list is.
@@ -344,7 +359,7 @@ fn add_contact_is_pinned_at_the_bottom_of_a_long_contact_list() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Contacts;
     rig.send(Update::Contacts(
-        (0..40).map(|i| Contact { id: 100 + i, name: format!("Person {i}"), by_qr: true, nearby: false, lease: true, blocked: false }).collect(),
+        (0..40).map(|i| Contact { id: 100 + i, name: format!("Person {i}"), by_qr: true, nearby: false, lease: true, blocked: false, ..Default::default() }).collect(),
     ));
     rig.ui.pump();
     let nodes = rig.nodes();
@@ -454,7 +469,7 @@ fn home_lists_streams_and_radio_and_watching_goes_through_its_states() {
     assert!(rig.contains("Radio from Priya"));
     rig.click("Live from Priya, Nearby");
     assert_eq!(rig.ui.watch.as_ref().unwrap().state, WatchState::Connecting);
-    assert!(rig.log().contains(&Command::Watch(1)));
+    assert!(rig.log().iter().any(|c| matches!(c, Command::Watch { id: 1, .. })));
     assert!(rig.has("Connecting to live video"));
     rig.send(Update::Watch(WatchEvent::Connected));
     assert!(rig.contains("Live stream"));
@@ -607,7 +622,7 @@ fn an_outgoing_voice_call_runs_ringing_active_mute_talk_and_end_from_the_screen(
     rig.send(Update::CallSignal(remote(ID, Signal::CameraOff)));
     assert!(rig.contains("Voice call"));
     rig.click("Mute");
-    assert!(rig.has("Unmute") && rig.has("Talk"));
+    assert!(rig.has("Unmute"));
     assert!(rig.signals().contains(&Signal::MicrophoneMuted));
     assert!(!rig.ui.call.as_ref().unwrap().sending_audio());
     rig.click("Unmute");
@@ -721,16 +736,17 @@ fn cancelling_while_it_rings_sends_cancel_and_a_busy_peer_ends_the_call() {
     assert_eq!(rig.ui.recent[0].result, "Busy");
 }
 
+/// Voice calls have no switch (Android, 2026-10-17): an off saved by an older
+/// Windows build no longer stops a voice call.
 #[test]
-fn a_voice_call_is_refused_when_voice_calls_are_switched_off() {
+fn a_voice_call_works_even_after_an_old_saved_voice_calls_off() {
     let mut rig = Rig::full();
     rig.populate();
     rig.ui.pump();
-    rig.ui.switches.voice_calls = false;
+    rig.ui.switches = crate::settings_store::decode("voice_calls=0\nonboarded=1\n");
     rig.ui.page = Page::Calls;
-    assert!(rig.disabled("Voice call Priya"));
-    assert!(!rig.ui.place_call(10, true));
-    assert!(rig.ui.place_call(10, false));
+    assert!(!rig.disabled("Voice call Priya"));
+    assert!(rig.ui.place_call(10, true));
 }
 
 #[test]
@@ -762,7 +778,7 @@ fn the_calls_page_says_when_this_pc_is_visible_to_phones_and_why_not() {
     rig.ui.switches.receive_calls = true;
     rig.send(Update::Visibility { visible: true, note: None });
     rig.ui.pump();
-    assert!(rig.has("Ready"));
+    assert!(rig.has("Status: ready"));
     let why = meshlive::qw_policy::NOT_LISTED;
     rig.send(Update::Visibility { visible: false, note: Some(why.into()) });
     rig.ui.pump();
@@ -794,7 +810,7 @@ fn the_call_screen_says_whether_the_microphone_is_on_or_why_it_cannot_be_used() 
 }
 
 #[test]
-fn holding_talk_past_the_click_limit_survives_readiness_but_leaving_or_releasing_mutes() {
+fn holding_mute_talks_through_readiness_and_letting_go_or_losing_focus_mutes_again() {
     for hold in [false, true] {
         let mut rig = Rig::full(); rig.ui.hold_call_talk = hold; rig.time = Some(0.0);
         rig.send(Update::IncomingCall { peer: "Test peer".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: None });
@@ -802,30 +818,71 @@ fn holding_talk_past_the_click_limit_survives_readiness_but_leaving_or_releasing
         rig.send(Update::CallSignal(remote(ID, Signal::CameraOff)));
         rig.send(Update::CallMediaReady); rig.send(Update::CallMic(None));
         rig.click("Mute");
-        let pos = rig.bounds("Talk", None).center();
+        let pos = rig.bounds("Unmute", None).center();
         let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         let _ = rig.frame(vec![egui::Event::PointerMoved(pos), button(true)]);
-        assert!(rig.ui.call.as_ref().unwrap().sending_audio());
+        assert!(!rig.ui.call.as_ref().unwrap().sending_audio(), "a press alone is not a hold");
+        rig.time = Some(0.5); let _ = rig.frame(vec![]);
+        assert!(rig.ui.call.as_ref().unwrap().sending_audio(), "held past the hold time: talking");
         rig.send(Update::CallCaptureStarting);
         rig.time = Some(1.0); let _ = rig.frame(vec![]);
-        assert_eq!(rig.ui.call.as_ref().unwrap().talking, hold, "the click-only control expires while the pointer remains down");
         rig.time = Some(2.0); rig.send(Update::CallMic(None)); rig.send(Update::CallCaptureReady);
         let _ = rig.frame(vec![]);
-        assert_eq!(rig.ui.call.as_ref().unwrap().sending_audio(), hold);
-        rig.time = Some(3.0); let _ = rig.frame(vec![]);
-        assert_eq!(rig.ui.call.as_ref().unwrap().talking, hold);
+        assert!(rig.ui.call.as_ref().unwrap().talking && rig.ui.call.as_ref().unwrap().sending_audio(), "past the click limit and through readiness");
         let _ = rig.frame(vec![egui::Event::PointerMoved(egui::Pos2::ZERO)]);
-        assert!(!rig.ui.call.as_ref().unwrap().sending_audio(), "leaving Talk cancels the hold");
+        assert_eq!(rig.ui.call.as_ref().unwrap().talking, !hold, "only the Experimental arm ends the hold when the pointer leaves Mute");
         let _ = rig.frame(vec![egui::Event::PointerMoved(pos)]);
-        assert_eq!(rig.ui.call.as_ref().unwrap().talking, hold);
         let _ = rig.frame(vec![button(false)]);
-        assert!(!rig.ui.call.as_ref().unwrap().talking && !rig.ui.call.as_ref().unwrap().sending_audio());
+        let call = rig.ui.call.as_ref().unwrap();
+        assert!(!call.talking && !call.sending_audio() && call.muted, "letting go mutes again; the click is not Unmute");
         assert_eq!(rig.signals().last(), Some(&Signal::MicrophoneMuted));
         rig.time = Some(4.0); let _ = rig.frame(vec![egui::Event::PointerMoved(pos), button(true)]);
+        rig.time = Some(4.5); let _ = rig.frame(vec![]);
+        assert!(rig.ui.call.as_ref().unwrap().sending_audio());
         rig.focused = false;
         let _ = rig.frame(vec![egui::Event::WindowFocused(false)]);
-        assert_eq!(rig.ui.call.as_ref().unwrap().sending_audio(), !hold, "the new arm cancels Talk on focus loss; the old arm is retained");
+        assert!(!rig.ui.call.as_ref().unwrap().sending_audio(), "losing focus ends the hold");
     }
+}
+
+#[test]
+fn a_short_click_on_mute_unmutes_and_holding_while_unmuted_does_nothing() {
+    let mut rig = Rig::full(); rig.time = Some(0.0);
+    rig.populate(); rig.ui.pump();
+    assert!(rig.ui.place_call(10, true));
+    rig.send(Update::CallSignal(remote(ID, Signal::Accept)));
+    rig.send(Update::CallMediaReady);
+    let pos = rig.bounds("Mute", None).center();
+    let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let _ = rig.frame(vec![egui::Event::PointerMoved(pos), button(true)]);
+    rig.time = Some(1.0); let _ = rig.frame(vec![]);
+    assert!(!rig.ui.call.as_ref().unwrap().talking, "not muted: holding is not talking");
+    let _ = rig.frame(vec![button(false)]);
+    rig.click("Mute");
+    assert!(rig.ui.call.as_ref().unwrap().muted);
+    rig.click("Unmute");
+    assert!(!rig.ui.call.as_ref().unwrap().muted, "a short click still unmutes");
+}
+
+#[test]
+fn the_call_row_is_mute_camera_end_flip_speaker_with_end_in_the_middle_in_every_state() {
+    let mut rig = Rig::full();
+    rig.populate(); rig.ui.pump();
+    assert!(rig.ui.place_call(10, true));
+    rig.send(Update::CallSignal(remote(ID, Signal::Accept)));
+    rig.send(Update::CallMediaReady);
+    let centre = |rig: &mut Rig, name: &str| rig.bounds(name, None).center();
+    let end = centre(&mut rig, "End call");
+    let xs: Vec<f32> = ["Mute", "Add video", "End call", "Switch camera", "Audio output"].iter().map(|n| centre(&mut rig, n).x).collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "Android's order left to right: {xs:?}");
+    assert!((xs[2] - (xs[0] + xs[4]) / 2.0).abs() < 1.0 && (xs[1] - xs[0] - (xs[4] - xs[3])).abs() < 1.0, "End in the middle, equal columns: {xs:?}");
+    assert!(rig.disabled("Switch camera") && rig.disabled("Audio output"), "nothing to switch to yet: the slots stay, disabled");
+    rig.click("Mute");
+    assert_eq!(centre(&mut rig, "End call"), end, "muting moves nothing");
+    rig.click("Add video");
+    assert_eq!(centre(&mut rig, "End call"), end, "video on moves nothing");
+    rig.click("End call");
+    assert_eq!(rig.signals().last(), Some(&Signal::HangUp));
 }
 
 #[test]
@@ -839,9 +896,12 @@ fn talk_waits_for_fresh_microphone_readiness_and_overrides_latched_mute_wording(
         rig.send(Update::CallMediaReady);
         rig.send(Update::CallMic(None));
         rig.click("Mute");
-        let pos = rig.bounds("Talk", None).center();
+        let pos = rig.bounds("Unmute", None).center();
         let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        rig.time = Some(10.0);
         let _ = rig.frame(vec![egui::Event::PointerMoved(pos), button(true)]);
+        rig.time = Some(10.5);
+        let _ = rig.frame(vec![]);
         rig.send(Update::CallCaptureStarting);
         assert!(rig.has("Starting microphone\u{2026}"));
         assert!(!rig.contains("Microphone on"));
@@ -885,7 +945,7 @@ fn the_call_screen_says_why_the_camera_cannot_be_used() {
 fn a_contacts_safety_code_is_shown_on_request() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Contacts;
-    rig.send(Update::Contacts(vec![Contact { id: 20, name: "Asha".into(), by_qr: true, nearby: false, lease: true, blocked: false }]));
+    rig.send(Update::Contacts(vec![Contact { id: 20, name: "Asha".into(), by_qr: true, nearby: false, lease: true, blocked: false, ..Default::default() }]));
     rig.ui.pump();
     rig.ui.contact_more = None;
     rig.click("More for Asha");
@@ -939,11 +999,13 @@ fn keyboard_shortcuts_mute_and_end_a_call_and_holding_talk_opens_the_microphone(
     rig.send(Update::CallMediaReady);
     let _ = rig.frame(vec![ctrl(egui::Key::M)]);
     assert!(rig.ui.call.as_ref().unwrap().muted);
-    // Holding Talk (the pointer down on it) sends unmuted; release sends muted.
-    let talk = rig.nodes().into_iter().find(|n| n.text == "Talk").unwrap().center.unwrap();
+    // Holding Mute (the pointer down on it) sends unmuted; release sends muted.
+    let talk = rig.nodes().into_iter().find(|n| n.text == "Unmute").unwrap().center.unwrap();
     let button = |pressed| egui::Event::PointerButton { pos: talk, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    rig.time = Some(0.0);
     let _ = rig.frame(vec![egui::Event::PointerMoved(talk)]);
     let _ = rig.frame(vec![button(true)]);
+    rig.time = Some(0.5);
     let _ = rig.frame(vec![]);
     assert!(rig.ui.call.as_ref().unwrap().talking);
     assert!(rig.ui.call.as_ref().unwrap().sending_audio());
@@ -1005,7 +1067,7 @@ fn going_live_with_video_shows_state_and_viewer_count_and_stops() {
     rig.click("Resume");
     rig.click("Camera off");
     assert!(rig.log().contains(&Command::LiveCamera(false)));
-    rig.click("Stop");
+    rig.click("Stop broadcast");
     assert!(rig.log().contains(&Command::StopLive));
     assert_eq!(rig.ui.golive.state, LiveState::Ended);
     rig.click("Back");
@@ -1020,7 +1082,7 @@ fn restarting_or_retrying_a_broadcast_keeps_mute_and_camera_off_in_the_start_req
     rig.send(Update::Live(LiveEvent::Started));
     rig.click("Mute"); rig.click("Camera off");
     assert!(rig.has("Unmute") && rig.has("Camera on"));
-    rig.click("Stop");
+    rig.click("Stop broadcast");
     rig.click("Go live");
     let expected = InitialMedia { muted: true, camera_off: true };
     assert!(matches!(rig.log().last(), Some(Command::GoLive { initial, .. }) if *initial == expected),
@@ -1085,7 +1147,7 @@ fn contacts_show_verification_and_contacts_with_a_lease_can_be_called_even_when_
     rig.ui.pump();
     rig.ui.page = Page::Contacts;
     assert!(rig.contains("Verified by QR code"));
-    assert!(rig.contains("Verified by safety code"));
+    assert!(rig.contains(CHECKED_BY_CODE));
     assert!(rig.contains("Ravi isn't nearby right now"));
     assert!(!rig.disabled("Voice call Ravi"));
     rig.click("Video call Priya");
@@ -1135,24 +1197,29 @@ fn settings_switches_follow_android_defaults_and_report_changes_to_the_core() {
     let mut rig = Rig::full();
     rig.size = egui::vec2(1000.0, 3600.0);
     rig.ui.page = Page::Settings;
-    for name in [
-        "Friendly names for nearby phones",
-        "Show my stream title to everyone nearby",
-        "Voice calls",
-        "Play ringing tone",
-        "Allow calls",
-        "Start with Windows",
-    ] {
+    for name in ["Allow calls", "Start with Windows"] {
         assert!(rig.has(name), "missing switch {name}");
     }
-    rig.click("Play ringing tone");
-    assert!(!rig.ui.switches.ringback);
+    for removed in [
+        "Friendly names for nearby phones",
+        "Show my name before they answer",
+        "Voice calls",
+        "Play ringing tone",
+        "Show my stream title to everyone nearby",
+        "Relay video for others",
+    ] {
+        assert!(!rig.contains(removed), "{removed} has no Settings row");
+    }
+    // As Android: Block unknown callers is on the Privacy page.
+    rig.click("Privacy");
+    assert!(rig.has("Block unknown callers"));
+    assert!(!rig.ui.switches.block_unknown, "off by default, as Android");
+    rig.click("Block unknown callers");
+    assert!(rig.ui.switches.block_unknown);
     match rig.log().last().unwrap() {
-        Command::Switches(s) => assert!(!s.ringback && s.generated_names),
+        Command::Switches(s) => assert!(s.block_unknown && s.receive_calls),
         other => panic!("{other:?}"),
     }
-    rig.click("Friendly names for nearby phones");
-    assert!(!rig.ui.switches.generated_names);
 }
 
 #[test]
@@ -1200,8 +1267,8 @@ fn a_contact_without_a_lease_says_ask_them_to_scan_and_cannot_be_called() {
     rig.ui.pump();
     rig.ui.page = Page::Contacts;
     rig.send(Update::Contacts(vec![
-        Contact { id: 20, name: "Asha".into(), by_qr: true, nearby: false, lease: false, blocked: false },
-        Contact { id: 21, name: "Ravi".into(), by_qr: true, nearby: false, lease: true, blocked: false },
+        Contact { id: 20, name: "Asha".into(), by_qr: true, nearby: false, lease: false, blocked: false, ..Default::default() },
+        Contact { id: 21, name: "Ravi".into(), by_qr: true, nearby: false, lease: true, blocked: false, ..Default::default() },
     ]));
     assert!(rig.contains("Ask Asha to scan your code too"));
     assert!(rig.disabled("Video call Asha"));
@@ -1228,18 +1295,56 @@ fn your_code_is_a_qr_picture_with_the_visibility_and_what_happened_to_it() {
     rig.ui.pump();
     rig.ui.page = Page::Contacts;
     rig.click("Add contact");
+    rig.click(super::screens::SEG_SHOW);
     assert!(rig.contains("Getting your code ready"));
     let code = format!("BVMID2.{}.{}.{}", "AB".repeat(32), "CD".repeat(32), "EF0123456789");
     rig.send(Update::Visibility { visible: true, note: None });
     rig.send(Update::OwnCode(Some(code.clone())));
     assert!(rig.has("Your code as a QR code"), "the code is drawn as a QR picture");
     assert!(rig.contains("Visible to people nearby. On the other phone, open Add contact and scan this code."));
-    assert!(rig.contains(&code));
+    assert!(!rig.contains(&code), "the code text is neither drawn nor read out");
     rig.send(Update::CodeScanned("Asha scanned your code. Now scan theirs (above), so you can find each other.".into()));
     assert!(rig.contains("Asha scanned your code"));
     // Not on air: the reason replaces the visibility line.
     rig.send(Update::Visibility { visible: false, note: Some(meshlive::qw_policy::NOT_LISTED.into()) });
     assert!(rig.contains("hasn't been checked"));
+}
+
+#[test]
+fn add_contact_says_when_windows_bluetooth_stopped_answering_and_recovers() {
+    let mut rig = Rig::full();
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    rig.click("Add contact");
+    rig.click(super::screens::SEG_SHOW);
+    assert!(rig.contains("Getting your code ready"));
+    // The worker's announcement start never returned (2026-11-06).
+    let guidance = meshlive::bluetooth::radio_watch::RESTART_GUIDANCE;
+    rig.send(Update::BluetoothNotResponding(true));
+    rig.send(Update::Visibility { visible: false, note: Some(guidance.into()) });
+    assert!(!rig.contains("Getting your code ready"), "no endless wait");
+    assert!(rig.contains("Turn Bluetooth off and on"));
+    // Every page's status says so and offers the way to fix it.
+    rig.click("Back");
+    assert!(rig.has("Bluetooth unavailable"));
+    rig.click("Open Bluetooth settings");
+    assert!(rig.log().contains(&Command::OpenBluetoothSettings));
+    // Bluetooth answers again: the status is fine and Add contact shows the code.
+    rig.send(Update::BluetoothNotResponding(false));
+    rig.send(Update::Visibility { visible: true, note: None });
+    assert!(rig.has("Status: ready"));
+    rig.click("Add contact");
+    rig.click(super::screens::SEG_SHOW);
+    rig.send(Update::OwnCode(Some("BVMID2.ABC".into())));
+    assert!(rig.has("Your code as a QR code"));
+    // Swapping to sample people leaves the stuck radio's note behind.
+    rig.click("Back");
+    rig.send(Update::BluetoothNotResponding(true));
+    rig.send(Update::Visibility { visible: false, note: Some(guidance.into()) });
+    assert!(rig.has("Bluetooth unavailable"));
+    rig.ui.set_demo(true);
+    assert!(!rig.has("Bluetooth unavailable"));
+    assert!(!rig.contains("Turn Bluetooth off and on"));
 }
 
 #[test]
@@ -1250,7 +1355,7 @@ fn add_contact_scans_a_pasted_code_and_asks_whose_screen_it_was() {
     rig.click("Add contact");
     assert!(rig.log().contains(&Command::ShowOwnCode));
     rig.send(Update::OwnCode(Some("BVMID2.ABC".into())));
-    assert!(rig.contains("BVMID2.ABC"));
+    assert!(!rig.contains("BVMID2.ABC"), "this PC's code is not printed");
     rig.ui.meet.as_mut().unwrap().code = "BVMID2.THEIRS".into();
     rig.click("Scan code");
     assert!(rig.log().contains(&Command::ScanCode("BVMID2.THEIRS".into())));
@@ -1258,7 +1363,8 @@ fn add_contact_scans_a_pasted_code_and_asks_whose_screen_it_was() {
     rig.send(Update::Meet(MeetEvent::Ask { name: "Green Heron".into() }));
     assert!(rig.contains("Is this Green Heron's screen you scanned?"));
     rig.click("Yes, it is");
-    assert!(rig.log().contains(&Command::ConfirmScan { yes: true, name: "Green Heron".into() }));
+    // "Save contact as" never starts with an ID (Android); empty keeps it.
+    assert!(rig.log().contains(&Command::ConfirmScan { yes: true, name: String::new() }));
     rig.send(Update::Meet(MeetEvent::Done("Green Heron is now a verified contact.".into())));
     assert!(rig.contains("now a verified contact"));
     rig.click("Back");
@@ -1266,8 +1372,51 @@ fn add_contact_scans_a_pasted_code_and_asks_whose_screen_it_was() {
     assert!(rig.ui.meet.is_none());
 }
 
+/// F2: from the moment Add contact opens (before the code arrives) until it
+/// closes, the window asks to stay out of captures.
+#[test]
+fn add_contact_keeps_the_window_out_of_captures_until_it_closes() {
+    let mut rig = Rig::full();
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    assert!(!rig.ui.code_on_screen());
+    rig.click("Add contact");
+    assert!(rig.ui.code_on_screen(), "protected before the code arrives");
+    rig.send(Update::OwnCode(Some("BVMID2.ABC".into())));
+    rig.click(super::screens::SEG_SHOW);
+    assert!(rig.has("Your code as a QR code"));
+    assert!(rig.ui.code_on_screen());
+    let _ = rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+    let _ = rig.frame(vec![]);
+    assert!(rig.ui.meet.is_none(), "Escape leaves Add contact");
+    assert!(!rig.ui.code_on_screen(), "captures are allowed again");
+}
+
+/// The code is copied, not printed; one press hands it to the
+/// window once, and a failed copy can be tried again.
+#[test]
+fn copy_code_hands_this_pcs_code_to_the_window_once_per_press() {
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 1200.0);
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    rig.click("Add contact");
+    rig.click(super::screens::SEG_SHOW);
+    assert!(!rig.has("Copy code"), "nothing to copy before the code exists");
+    let code = format!("BVMID2.{}.{}.{}", "AB".repeat(32), "CD".repeat(32), "EF0123456789");
+    rig.send(Update::OwnCode(Some(code.clone())));
+    assert_eq!(rig.ui.take_clipboard_request(), None);
+    rig.click("Copy code");
+    assert_eq!(rig.ui.take_clipboard_request(), Some(code.clone()));
+    assert_eq!(rig.ui.take_clipboard_request(), None, "one copy per press");
+    rig.ui.clipboard_done(false);
+    rig.click("Copy code");
+    assert_eq!(rig.ui.take_clipboard_request(), Some(code));
+}
+
 #[test]
 fn a_caller_with_a_real_key_can_be_blocked_from_recent_calls() {
+    use meshlive::blocking::BlockChange;
     let mut rig = Rig::full();
     rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some([5; 32]) });
     rig.ui.pump();
@@ -1276,10 +1425,17 @@ fn a_caller_with_a_real_key_can_be_blocked_from_recent_calls() {
     rig.ui.page = Page::Calls;
     rig.ui.recent_tab = true;
     rig.click("Block Priya");
+    assert!(rig.ui.block_confirm.is_some(), "it asks first, as Android");
+    rig.click("Cancel");
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::BlockCaller { .. })), "Cancel blocks nobody");
+    rig.click("Block Priya");
+    rig.click("Block");
     assert!(rig.log().contains(&Command::BlockCaller { fingerprint: [5; 32], blocked: true }));
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Priya".into(), change: BlockChange::Blocked });
+    rig.ui.pump();
     assert!(rig.contains("Blocked: their calls are declined without ringing."));
     rig.click("Unblock Priya");
-    assert!(rig.log().contains(&Command::BlockCaller { fingerprint: [5; 32], blocked: false }));
+    assert!(rig.log().contains(&Command::BlockCaller { fingerprint: [5; 32], blocked: false }), "unblocking does not ask");
     // A pseudonymous caller has no fingerprint to block.
     let other = [0x77; 16];
     rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(other, Signal::Invite), fingerprint: None });
@@ -1289,6 +1445,210 @@ fn a_caller_with_a_real_key_can_be_blocked_from_recent_calls() {
     rig.ui.page = Page::Calls;
     rig.ui.recent_tab = true;
     assert!(!rig.has("Block Blue Otter"));
+}
+
+/// What a block did is said on the page until Close; a failure is never
+/// shown as a success; Recent rows follow the block list.
+#[test]
+fn block_outcomes_are_said_and_recent_rows_follow_the_list() {
+    use meshlive::blocking::BlockChange;
+    use super::blocked::{BlockFrom, change_note};
+    let mut rig = Rig::full();
+    rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some([5; 32]) });
+    rig.ui.pump();
+    rig.click("Decline");
+    rig.click("Back");
+    rig.ui.page = Page::Calls;
+    rig.ui.recent_tab = true;
+    rig.send(Update::Blocked(BlockedView { people: vec![BlockedPerson { fingerprint: [5; 32], name: "Priya".into(), since_ms: 0 }], unreadable: false }));
+    assert!(rig.has("Unblock Priya"), "the row follows the list");
+    rig.send(Update::Blocked(BlockedView { people: vec![], unreadable: true }));
+    assert!(rig.has("Unblock Priya"), "an unreadable list changes no row");
+    rig.send(Update::Blocked(BlockedView::default()));
+    assert!(rig.has("Block Priya"));
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Priya".into(), change: BlockChange::Failed });
+    let failed = change_note(BlockFrom::Confirmed, BlockChange::Failed, "Priya");
+    assert!(rig.contains(&failed));
+    assert!(!rig.contains(&change_note(BlockFrom::Confirmed, BlockChange::Blocked, "Priya")), "a failure never reads as blocked");
+    rig.click("Close");
+    assert!(!rig.contains(&failed));
+}
+
+/// A failed block is said as a failure and Recent still offers Block: the
+/// row follows the saved outcome, not the tap.
+#[test]
+fn a_full_block_list_leaves_recent_offering_block() {
+    use meshlive::blocking::BlockChange;
+    use super::blocked::{BlockFrom, change_note};
+    let mut rig = Rig::full();
+    rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some([5; 32]) });
+    rig.ui.pump();
+    rig.click("Decline");
+    rig.click("Back");
+    rig.ui.page = Page::Calls;
+    rig.ui.recent_tab = true;
+    rig.click("Block Priya");
+    rig.click("Block");
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Priya".into(), change: BlockChange::Full });
+    rig.ui.pump();
+    assert!(rig.contains(&change_note(BlockFrom::Confirmed, BlockChange::Full, "Priya")));
+    assert!(rig.has("Block Priya") && !rig.has("Unblock Priya"), "a full list blocks nobody");
+}
+
+/// Decline and block (Android `declineAndBlockButton`): declines, then
+/// blocks the caller and says so; never offered for a one-time ID.
+#[test]
+fn decline_and_block_declines_and_blocks_only_a_caller_with_a_real_key() {
+    use meshlive::blocking::BlockChange;
+    use super::blocked::{BlockFrom, DECLINE_AND_BLOCK, change_note};
+    let mut rig = Rig::full();
+    rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some([5; 32]) });
+    rig.ui.pump();
+    rig.click(DECLINE_AND_BLOCK);
+    assert!(rig.signals().contains(&Signal::Decline), "the call is declined");
+    assert_eq!(rig.log().last(), Some(&Command::BlockCaller { fingerprint: [5; 32], blocked: true }), "then the caller is blocked");
+    assert_eq!(rig.ui.call.as_ref().unwrap().phase(), Phase::Ended);
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Priya".into(), change: BlockChange::Blocked });
+    rig.click("Back");
+    assert!(rig.contains(&change_note(BlockFrom::DeclineAndBlock, BlockChange::Blocked, "Priya")));
+    let other = [0x77; 16];
+    rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(other, Signal::Invite), fingerprint: None });
+    rig.ui.pump();
+    assert!(rig.has("Decline") && !rig.has(DECLINE_AND_BLOCK), "a one-time ID can't be blocked one by one");
+}
+
+/// A new call over an ended call's screen uses its own key: a one-time
+/// caller offers no Decline and block, and a real-key caller blocks itself,
+/// never the caller whose Ended screen it replaced.
+#[test]
+fn decline_and_block_after_an_ended_call_blocks_the_new_caller_not_the_previous_one() {
+    use super::blocked::DECLINE_AND_BLOCK;
+    let mut rig = Rig::full();
+    // The Block unknown callers offer after a one-time caller's Decline has its own test.
+    rig.ui.switches.block_unknown_offer_dismissed = true;
+    let a = [0xaa; 32];
+    rig.send(Update::IncomingCall { peer: "Asha".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some(a) });
+    rig.ui.pump();
+    rig.click("Decline");
+    assert_eq!(rig.ui.call.as_ref().unwrap().phase(), Phase::Ended);
+    let other = [0x77; 16];
+    rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(other, Signal::Invite), fingerprint: None });
+    rig.ui.pump();
+    assert!(!rig.has(DECLINE_AND_BLOCK), "a one-time caller cannot be blocked one by one");
+    rig.click("Decline");
+    let b = [0xbb; 32];
+    rig.send(Update::IncomingCall { peer: "Ravi".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some(b) });
+    rig.ui.pump();
+    rig.click(DECLINE_AND_BLOCK);
+    let log = rig.log();
+    let last = log.iter().rev().find(|c| matches!(c, Command::BlockCaller { .. })).unwrap();
+    assert_eq!(last, &Command::BlockCaller { fingerprint: b, blocked: true });
+    assert!(!log.iter().any(|c| matches!(c, Command::BlockCaller { fingerprint, .. } if *fingerprint == a)), "the previous caller is not blocked");
+}
+
+/// Updates from a previous watch task cannot act on a new one: only the
+/// current watch's id may set its source or close it.
+#[test]
+fn stale_watch_updates_cannot_act_on_a_new_watch() {
+    use meshlive::stream_watch::StreamRoute;
+    let mut rig = Rig::full();
+    rig.populate();
+    assert!(rig.ui.start_watch(1));
+    let first = rig.ui.watch_id.unwrap();
+    assert!(rig.ui.start_watch(2));
+    let second = rig.ui.watch_id.unwrap();
+    assert_ne!(first, second);
+    let route = StreamRoute { logical: 1, prefix: [8; 6] };
+    rig.send(Update::WatchSource { id: first, fingerprint: [0x11; 32], route });
+    rig.ui.pump();
+    assert!(rig.ui.watch.is_some() && rig.ui.watch_source.is_none(), "the previous watch's source is ignored");
+    rig.send(Update::WatchSource { id: second, fingerprint: [0x22; 32], route });
+    rig.ui.pump();
+    assert_eq!(rig.ui.watch_source, Some([0x22; 32]), "the current watch's source is used");
+    rig.send(Update::WatchSourceBlocked { id: first });
+    rig.ui.pump();
+    assert!(rig.ui.watch.is_some(), "the previous watch cannot close the new one");
+    rig.send(Update::WatchSourceBlocked { id: second });
+    rig.ui.pump();
+    assert!(rig.ui.watch.is_none(), "the current watch's end closes it");
+}
+
+/// Block this person (Android's listener; also the viewer): offered only
+/// once the source's key is authenticated; it blocks, hides the stream and
+/// leaves, and says so. A blocked source found by the backend leaves at once.
+#[test]
+fn block_this_person_shows_only_for_a_known_source_and_blocks_hides_and_leaves() {
+    use meshlive::blocking::BlockChange;
+    use super::blocked::{BLOCK_THIS_PERSON, BlockFrom, change_note};
+    for id in [2, 1] {
+        let mut rig = Rig::full();
+        rig.populate();
+        assert!(rig.ui.start_watch(id));
+        rig.send(Update::Watch(WatchEvent::Connected));
+        assert!(!rig.has(BLOCK_THIS_PERSON), "no authenticated source key yet");
+        let route = meshlive::stream_watch::StreamRoute { logical: 1, prefix: [1; 6] };
+        rig.send(Update::WatchSource { id: rig.ui.watch_id.unwrap(), fingerprint: [7; 32], route });
+        rig.click(BLOCK_THIS_PERSON);
+        let log = rig.log();
+        let block_at = log.iter().position(|c| matches!(c, Command::BlockCaller { fingerprint, blocked: true } if *fingerprint == [7; 32])).unwrap();
+        assert_eq!(&log[block_at + 1..block_at + 3], &[
+            Command::HideWatchedStream { source: [7; 16], route },
+            Command::StopWatching,
+        ], "block, hide this route, then leave");
+        assert!(rig.ui.watch.is_none(), "it leaves");
+        rig.send(Update::BlockChanged { fingerprint: [7; 32], name: "Asha".into(), change: BlockChange::Blocked });
+        assert!(rig.contains(&change_note(BlockFrom::Stream, BlockChange::Blocked, "Asha")));
+    }
+    let mut rig = Rig::full();
+    rig.populate();
+    assert!(rig.ui.start_watch(1));
+    rig.send(Update::WatchSourceBlocked { id: rig.ui.watch_id.unwrap() });
+    rig.ui.pump();
+    assert!(rig.ui.watch.is_none());
+    assert!(rig.log().contains(&Command::StopWatching));
+}
+
+/// "Block this person" hides the route whose source this PC authenticated,
+/// not the row that was tapped (a relayed row can join the direct route).
+#[test]
+fn block_this_person_hides_the_route_that_was_authenticated() {
+    use meshlive::stream_watch::StreamRoute;
+    use super::blocked::BLOCK_THIS_PERSON;
+    let mut rig = Rig::full();
+    rig.populate();
+    assert!(rig.ui.start_watch(1));
+    let id = rig.ui.watch_id.unwrap();
+    let direct = StreamRoute { logical: 7, prefix: [3; 6] };
+    let relayed = StreamRoute { logical: 7, prefix: [2; 6] };
+    rig.send(Update::WatchSource { id, fingerprint: [7; 32], route: direct });
+    rig.ui.pump();
+    rig.click(BLOCK_THIS_PERSON);
+    assert!(rig.log().contains(&Command::HideWatchedStream { source: [7; 16], route: direct }), "the authenticated route is hidden");
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::HideWatchedStream { route, .. } if *route == relayed)), "the tapped relayed row is not hidden by this action");
+}
+
+/// A contact's More > Block asks first (Android `confirmBlock`); Cancel
+/// blocks nobody; Unblock does not ask.
+#[test]
+fn blocking_a_contact_asks_first_and_unblocking_does_not() {
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.page = Page::Contacts;
+    rig.ui.contact_more = None;
+    rig.click("More for Ravi");
+    rig.click("Block Ravi");
+    assert!(rig.ui.block_confirm.is_some(), "it asks first");
+    rig.click("Cancel");
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::SetBlocked { .. })), "Cancel blocks nobody");
+    // Every sheet row closes the sheet first (Android): open it again.
+    rig.click("More for Ravi");
+    rig.click("Block Ravi");
+    rig.click("Block");
+    assert_eq!(rig.log().last(), Some(&Command::SetBlocked { contact: 12, blocked: true }));
+    rig.send(Update::Contacts(vec![Contact { id: 12, name: "Ravi".into(), by_qr: false, nearby: false, lease: true, blocked: true, ..Default::default() }]));
+    rig.click("More for Ravi");
+    rig.click("Unblock Ravi");
+    assert_eq!(rig.log().last(), Some(&Command::SetBlocked { contact: 12, blocked: false }));
 }
 
 #[test]
@@ -1410,7 +1770,9 @@ fn a_screen_reader_can_set_the_welcome_name() {
     let request = ActionRequest { action: Action::SetValue, target: *id, data: Some(ActionData::Value("Test PC".into())) };
     let _ = rig.frame(vec![egui::Event::AccessKitActionRequest(request)]);
     assert_eq!(rig.ui.welcome_name, "Test PC");
-    rig.click("Start");
+    for button in ["Next", "Next", "Not now", "Start"] {
+        rig.click(button);
+    }
     assert!(rig.log().contains(&Command::SetOwnName("Test PC".into())));
 }
 
@@ -1418,13 +1780,16 @@ fn a_screen_reader_can_set_the_welcome_name() {
 fn the_first_run_welcome_sets_the_optional_name_and_is_shown_once() {
     let mut rig = Rig::full();
     rig.ui.switches.onboarded = false;
-    assert!(rig.contains("Welcome to MeshLive"));
-    assert!(rig.contains("Bluetooth is ready."));
+    assert!(rig.contains(super::WELCOME_TITLE));
     rig.ui.welcome_name = "  Asha ".into();
-    rig.click("Start");
+    rig.click("Next");
+    assert!(rig.contains("Bluetooth is ready."));
+    for button in ["Next", "Not now", "Start"] {
+        rig.click(button);
+    }
     assert!(rig.log().contains(&Command::SetOwnName("Asha".into())));
     assert!(rig.log().iter().any(|c| matches!(c, Command::Switches(s) if s.onboarded)), "saved, so never shown again");
-    assert!(!rig.contains("Welcome to MeshLive"));
+    assert!(!rig.contains(super::WELCOME_TITLE));
 }
 
 /// Android parity (activity_main.xml streamModeButton): Home's Go live is the
@@ -1439,7 +1804,7 @@ fn the_home_go_live_is_primary_with_the_red_live_icon() {
 
 /// Every pair of neighbouring switch rows in Settings has a divider between
 /// them, including rows that both carry the (i) button (user report on
-/// ae751be: the line was missing there).
+/// an earlier build: the line was missing there).
 #[test]
 fn every_neighbouring_pair_of_settings_switches_has_a_divider() {
     use egui::accesskit::Role;
@@ -1478,52 +1843,274 @@ fn every_neighbouring_pair_of_settings_switches_has_a_divider() {
     assert!(missing.is_empty(), "no divider between: {missing:#?}\nlines at {lines:?}");
 }
 
-/// Android's status indicator: a green "Ready" when phones can call this
-/// PC, "Hidden" when they can't; tapping it opens the popover with the
-/// Reachable switch (Allow calls, while awake) and the generated name. The
-/// Calls page itself carries no status card.
+/// Android's status indicator: all well is the green dot alone ("Status:
+/// ready" for a screen reader), a problem adds its word; a click opens the
+/// Status sheet, whose Allow calls row replaces the old Reachable switch.
+/// The Calls page itself carries no status card.
 #[test]
-fn the_status_indicator_says_ready_or_hidden_and_opens_reachable_and_your_name() {
+fn the_status_indicator_is_a_dot_when_ready_and_names_the_problem() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Calls;
     rig.ui.switches.receive_calls = true;
     rig.ui.pc_visible = true;
     rig.ui.own_generated = Some("Gold Fox".into());
-    assert!(rig.has("Ready"));
+    assert!(rig.has("Status: ready"));
+    assert!(!rig.has("Ready"), "all well: the dot alone, as Android");
     assert!(!rig.contains("Visible to people nearby"), "no card on the page");
-    // Calls > Nearby shows the one quiet line (Android OwnNearbyName).
-    let appear = "You appear as Gold Fox \u{b7} changes every 15 min";
-    assert_eq!(rig.texts().iter().filter(|t| *t == appear).count(), 1);
-    rig.click("Ready");
-    assert_eq!(rig.texts().iter().filter(|t| *t == appear).count(), 2, "and the popover");
-    assert!(rig.has("Phones nearby can call this PC while it's awake"));
-    rig.click("Reachable");
-    assert!(!rig.ui.switches.receive_calls);
-    assert!(rig.log().iter().any(|c| matches!(c, Command::Switches(s) if !s.receive_calls)));
-    assert!(rig.has("Hidden"), "phones can't call: Android's word");
-    rig.click("Reachable");
-    assert!(rig.ui.switches.receive_calls);
-    assert!(rig.has("Ready"));
-    // Escape closes it.
+    rig.click("Status: ready");
+    assert!(rig.ui.status_open.is_some(), "the click opens the Status sheet");
+    assert!(rig.has("Allow calls") && rig.has("Nearby you appear as"));
+    assert!(!rig.has("Reachable"), "one name for one switch, and the switch lives in Settings");
     let _ = rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
-    assert!(!rig.has("Reachable"), "the popover closed");
+    assert!(rig.ui.status_open.is_none(), "Escape closes it");
+    // Allow calls off: phones can't call, Android's word.
+    rig.ui.switches.receive_calls = false;
+    assert!(rig.has("Hidden"));
     // A problem shows its word.
     rig.ui.bluetooth = Some(Capabilities { radio: Radio::Off, ..caps(true, true) });
     assert!(rig.has("Bluetooth off"));
 }
 
-/// Settings "Your ID" shows this PC's real ID (Android's handle), never a
-/// placeholder once the backend has read it; tapping it shows your code.
+/// Android's order: Bluetooth first (a live stream no longer hides it), then
+/// watching or live (the backend stops announcing calls then), then Hidden.
 #[test]
-fn your_id_shows_the_real_id_and_opens_your_code() {
+fn the_status_follows_androids_order() {
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.switches.receive_calls = true;
+    rig.ui.pc_visible = true;
+    assert_eq!(rig.ui.status_kind(), StatusKind::Ready);
+    rig.ui.switches.receive_calls = false;
+    assert_eq!(rig.ui.status_kind(), StatusKind::Hidden);
+    rig.ui.switches.receive_calls = true;
+    assert!(rig.ui.start_live());
+    assert_eq!(rig.ui.status_kind(), StatusKind::Live, "not 'On air' any more");
+    rig.send(Update::BluetoothNotResponding(true));
+    rig.ui.pump();
+    assert_eq!(rig.ui.status_kind(), StatusKind::BluetoothUnavailable, "a stuck Bluetooth stack comes first too");
+    rig.send(Update::BluetoothNotResponding(false));
+    rig.ui.pump();
+    rig.ui.bluetooth = Some(Capabilities { radio: Radio::Off, ..caps(true, true) });
+    assert_eq!(rig.ui.status_kind(), StatusKind::BluetoothOff, "Bluetooth comes first");
+    rig.ui.bluetooth = Some(Capabilities { radio: Radio::Denied, ..caps(true, true) });
+    assert_eq!(rig.ui.status_kind(), StatusKind::Permissions);
+    let mut rig = Rig::full();
+    rig.populate();
+    assert!(rig.ui.start_watch(1));
+    assert_eq!(rig.ui.status_kind(), StatusKind::Watching);
+}
+
+/// A narrow window keeps the whole title and shows the dot alone; a wide one
+/// shows the word too (Android `fitStatusChip`).
+#[test]
+fn a_narrow_window_keeps_the_whole_title_and_shows_the_dot() {
+    use egui::accesskit::Role;
+    let mut rig = Rig::full();
+    rig.populate();
+    assert!(rig.ui.start_live());
+    rig.ui.golive_open = false;
+    rig.ui.page = Page::Settings;
+    let word = StatusKind::Live.word();
+    rig.size = egui::vec2(1400.0, 900.0);
+    let wide_title = rig.bounds("Settings", Some(Role::Label));
+    let wide_chip = rig.bounds(word, Some(Role::Button));
+    rig.size = egui::vec2(360.0, 900.0);
+    let narrow_title = rig.bounds("Settings", Some(Role::Label));
+    let narrow_chip = rig.bounds(word, Some(Role::Button));
+    assert!((narrow_title.width() - wide_title.width()).abs() < 0.5, "the title is never cut: {narrow_title:?} vs {wide_title:?}");
+    assert!(wide_chip.width() > 100.0, "wide: the word shows: {wide_chip:?}");
+    assert!(narrow_chip.width() < 48.0, "narrow: the dot alone: {narrow_chip:?}");
+}
+
+/// Every click opens the sheet (Android 2026-10-21); with Bluetooth off its
+/// one action opens Windows Bluetooth settings. Add contact carries the
+/// indicator, and Escape closes the sheet before it leaves the screen.
+#[test]
+fn add_contact_has_the_status_and_its_sheet_fixes_bluetooth() {
+    let mut rig = Rig::full();
+    rig.ui.page = Page::Contacts;
+    rig.click("Add contact");
+    rig.ui.bluetooth = Some(Capabilities { radio: Radio::Off, ..caps(true, true) });
+    rig.click("Bluetooth off");
+    assert!(rig.ui.status_open.is_some(), "a Bluetooth problem opens the sheet too");
+    let escape = || egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+    let _ = rig.frame(vec![escape()]);
+    let _ = rig.frame(vec![]);
+    assert!(rig.ui.status_open.is_none() && rig.ui.meet.is_some(), "Escape closed the sheet only");
+    rig.click("Bluetooth off");
+    rig.click("Open Bluetooth settings");
+    assert!(rig.log().contains(&Command::OpenBluetoothSettings));
+    assert!(rig.ui.status_open.is_none(), "the action closes the sheet");
+    let _ = rig.frame(vec![escape()]);
+    let _ = rig.frame(vec![]);
+    assert!(rig.ui.meet.is_none(), "the next Escape leaves Add contact");
+}
+
+/// Go live carries the indicator too, and while live it says calls are paused.
+#[test]
+fn go_live_has_the_status_and_says_calls_are_paused_while_live() {
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.switches.receive_calls = true;
+    rig.ui.pc_visible = true;
+    rig.click("Go live");
+    assert!(rig.ui.golive_open);
+    assert!(rig.has("Status: ready"));
+    assert!(rig.ui.start_live());
+    rig.click(StatusKind::Live.word());
+    assert!(rig.ui.status_open.is_some());
+}
+
+/// While calls are allowed, the sheet warns when Windows blocks MeshLive's
+/// notifications (a call would show only in the window and the taskbar).
+#[test]
+fn the_status_sheet_warns_when_windows_blocks_call_notifications() {
+    let mut rig = Rig::full();
+    rig.ui.page = Page::Calls;
+    rig.ui.switches.receive_calls = true;
+    rig.ui.pc_visible = true;
+    rig.ui.notifications_off = true;
+    rig.click("Status: ready");
+    assert!(rig.contains(super::NOTIFICATIONS_OFF));
+    rig.ui.switches.receive_calls = false;
+    assert!(!rig.contains(super::NOTIFICATIONS_OFF), "no calls, nothing to warn about");
+    rig.ui.switches.receive_calls = true;
+    rig.ui.notifications_off = false;
+    assert!(!rig.contains(super::NOTIFICATIONS_OFF));
+}
+
+/// Settings > Your code opens Add contact with this PC's code (Android: the
+/// row has no value).
+#[test]
+fn your_code_opens_add_contact() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Settings;
     rig.send(Update::OwnId(Some("7KQ2M-4ZD80".into())));
     rig.ui.pump();
-    assert!(rig.has("Your ID, 7KQ2M-4ZD80"));
-    assert!(!rig.contains("Not created"));
-    rig.click("Your ID, 7KQ2M-4ZD80");
+    assert!(!rig.contains("7KQ2M-4ZD80"), "no value on the row");
+    rig.click("Your code");
     assert!(rig.ui.meet.is_some(), "your code opens, as on Android");
+    assert!(rig.ui.meet.as_ref().is_some_and(|m| m.show_code), "on Show my code (Android EXTRA_SHOW_CODE)");
+}
+
+/// Android's Settings tree: every page opens from its row, and Back or
+/// Escape returns to the top page; the rail's Settings item does too.
+#[test]
+fn every_settings_page_opens_from_its_row_and_back_or_escape_returns() {
+    let escape = || egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 3000.0);
+    rig.ui.page = Page::Settings;
+    for page in [SettingsPage::Privacy, SettingsPage::Connection, SettingsPage::Manual, SettingsPage::Experiments, SettingsPage::Help, SettingsPage::About] {
+        rig.click(page.title());
+        assert_eq!(rig.ui.settings_page, page);
+        rig.click("Back");
+        assert_eq!(rig.ui.settings_page, SettingsPage::Main, "Back from {page:?}");
+        rig.click(page.title());
+        let _ = rig.frame(vec![escape()]);
+        let _ = rig.frame(vec![]);
+        assert_eq!(rig.ui.settings_page, SettingsPage::Main, "Escape from {page:?}");
+    }
+    // The status indicator stays on a pushed page; Escape closes its sheet first.
+    rig.click("Privacy");
+    let chip = rig.ui.status_kind().a11y();
+    rig.click(chip);
+    assert!(rig.ui.status_open.is_some());
+    let _ = rig.frame(vec![escape()]);
+    let _ = rig.frame(vec![]);
+    assert!(rig.ui.status_open.is_none() && rig.ui.settings_page == SettingsPage::Privacy, "Escape closed the sheet only");
+    rig.click("Settings");
+    assert_eq!(rig.ui.settings_page, SettingsPage::Main, "the rail item opens the top page");
+}
+
+/// Reset private ID asks first; Cancel sends nothing; Reset sends the
+/// command and the page says what the backend answered.
+#[test]
+fn reset_private_id_asks_first_then_resets() {
+    let mut rig = Rig::full();
+    rig.ui.page = Page::Settings;
+    rig.click("Privacy");
+    rig.click("Reset private ID");
+    assert!(rig.ui.reset_id_confirm, "it asks first");
+    rig.click("Cancel");
+    assert!(!rig.ui.reset_id_confirm);
+    assert!(!rig.log().contains(&Command::ResetPresenceKey), "Cancel resets nothing");
+    rig.click("Reset private ID");
+    rig.click("Reset");
+    assert!(rig.log().contains(&Command::ResetPresenceKey));
+    rig.send(Update::PrivateIdReset(true));
+    assert!(rig.contains(super::settings::RESET_ID_DONE));
+    rig.send(Update::PrivateIdReset(false));
+    assert!(rig.contains(super::settings::RESET_ID_FAILED));
+}
+
+/// Settings > Privacy > Blocked people (Android `BlockedPeopleActivity`):
+/// people by name or ID with when, Unblock after asking (Cancel unblocks
+/// nobody), the empty and unreadable states, Reset after asking, and Back
+/// or Escape to Privacy.
+#[test]
+fn blocked_people_lists_and_unblocks_after_asking_and_resets_an_unreadable_list() {
+    use meshlive::blocking::BlockChange;
+    use super::blocked::{BlockFrom, EMPTY_TITLE, change_note, since_text};
+    let escape = || egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 1400.0);
+    rig.ui.page = Page::Settings;
+    rig.click("Privacy");
+    rig.click("Blocked people");
+    assert_eq!(rig.ui.settings_page, SettingsPage::Blocked);
+    assert!(rig.contains(EMPTY_TITLE), "nobody blocked yet");
+    let since = 1_793_923_200_000 + 43_200_000;
+    let id = meshlive::names::handle(&[6; 6]);
+    rig.send(Update::Blocked(BlockedView {
+        people: vec![
+            BlockedPerson { fingerprint: [5; 32], name: "Asha".into(), since_ms: since },
+            BlockedPerson { fingerprint: [6; 32], name: id.clone(), since_ms: 0 },
+        ],
+        unreadable: false,
+    }));
+    assert!(rig.has("Asha, blocked") && rig.has(&format!("{id}, blocked")));
+    assert!(rig.painted(&since_text(since).unwrap()), "when Asha was blocked");
+    assert!(!rig.contains(EMPTY_TITLE));
+    rig.click("Asha, blocked");
+    assert!(rig.ui.unblock_confirm.is_some(), "it asks first");
+    rig.click("Cancel");
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::BlockCaller { .. })), "Cancel unblocks nobody");
+    rig.click("Asha, blocked");
+    rig.click("Unblock");
+    assert_eq!(rig.log().last(), Some(&Command::BlockCaller { fingerprint: [5; 32], blocked: false }));
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Asha".into(), change: BlockChange::Unblocked });
+    assert!(rig.contains(&change_note(BlockFrom::Unblock, BlockChange::Unblocked, "Asha")));
+    rig.send(Update::Blocked(BlockedView { people: vec![], unreadable: true }));
+    assert!(!rig.contains(EMPTY_TITLE), "an unreadable list is not an empty one");
+    rig.click("Reset block list");
+    assert!(rig.ui.reset_blocks_confirm, "it asks first");
+    rig.click("Reset");
+    assert_eq!(rig.log().last(), Some(&Command::ResetBlocked));
+    rig.click("Back");
+    assert_eq!(rig.ui.settings_page, SettingsPage::Privacy, "Back returns to Privacy");
+    rig.click("Blocked people");
+    let _ = rig.frame(vec![escape()]);
+    let _ = rig.frame(vec![]);
+    assert_eq!(rig.ui.settings_page, SettingsPage::Privacy, "Escape returns to Privacy");
+}
+
+/// The experiments live on their own page and act at once (this run only).
+#[test]
+fn the_experiments_page_turns_on_sample_people_and_split_panes() {
+    let mut rig = Rig::full();
+    // Tall enough for the whole top page (Video quality and Manual video added rows).
+    rig.size = egui::vec2(1000.0, 3000.0);
+    rig.ui.page = Page::Settings;
+    rig.click("Experiments");
+    rig.click("Show sample people and streams (Experimental)");
+    assert!(rig.ui.demo, "sample people are on");
+    rig.click("Split panes on wide windows (Experimental)");
+    assert!(rig.ui.split_panes);
+    // A wide window then shows the top page beside the chosen page.
+    rig.size = egui::vec2(2000.0, 1200.0);
+    assert!(rig.has("Delete everything") && rig.has("Show GPU texture test"), "both panes");
+    assert!(!rig.has("Back"), "no Back in the split layout");
 }
 
 /// On the Windows Bluetooth owner (no live streams yet) the Live tab says
@@ -1541,8 +2128,6 @@ fn without_live_streams_no_control_sends_an_unhandled_command() {
     assert!(!names.iter().any(|n| n.starts_with("Watch")), "no stream rows to watch: {names:?}");
     rig.ui.page = Page::Settings;
     rig.size = egui::vec2(700.0, 4000.0);
-    assert!(!rig.contains("Relay video for others"));
-    assert!(!rig.contains("Show my stream title"));
     // Everything a page offers is handled by the real backend.
     let unhandled = [
         "Watch", "StopWatching", "MuteWatch", "GoLive", "StopLive", "PauseLive", "MuteLive", "LiveCamera",
@@ -1564,6 +2149,11 @@ fn without_live_streams_no_control_sends_an_unhandled_command() {
             rig.ui.name_edit = None;
             rig.ui.copied_confirm = None;
             rig.ui.call = None;
+            rig.ui.reset_id_confirm = false;
+            rig.ui.block_confirm = None;
+            rig.ui.unblock_confirm = None;
+            rig.ui.reset_blocks_confirm = false;
+            rig.ui.settings_page = SettingsPage::Main;
         }
     }
     assert!(rig.log().iter().all(|c| !unhandled.iter().any(|u| format!("{c:?}").starts_with(u))), "{:?}", rig.log());
@@ -1613,12 +2203,11 @@ fn pages_use_a_wide_window_and_grow_with_it() {
 
 /// The made-up name strangers see for this PC: on the Calls page with an
 /// (i), on the incoming call of a stranger and on Add contact; it follows
-/// the backend (new name at every epoch) and the Friendly names switch.
+/// the backend (new name at every epoch); friendly names are always on.
 #[test]
 fn your_generated_name_is_shown_where_strangers_meet_this_pc() {
     let mut rig = Rig::full();
     rig.populate();
-    rig.ui.switches.generated_names = true;
     rig.ui.page = Page::Calls;
     assert!(!rig.contains("You appear as"), "nothing before this PC is on air");
     rig.send(Update::OwnGeneratedName(Some("Gold Fox".into())));
@@ -1629,13 +2218,10 @@ fn your_generated_name_is_shown_where_strangers_meet_this_pc() {
     // The next epoch: a new name.
     rig.send(Update::OwnGeneratedName(Some("Quiet Heron".into())));
     assert!(rig.has("You appear as Quiet Heron \u{b7} changes every 15 min"));
-    // Off air, or Friendly names off: no line.
+    // Off air: no line.
     rig.send(Update::OwnGeneratedName(None));
     assert!(!rig.contains("You appear as"));
     rig.send(Update::OwnGeneratedName(Some("Gold Fox".into())));
-    rig.ui.switches.generated_names = false;
-    assert!(!rig.contains("You appear as"));
-    rig.ui.switches.generated_names = true;
     // Add contact.
     rig.ui.page = Page::Contacts;
     rig.click("Add contact");
@@ -1673,15 +2259,19 @@ fn the_info_button_follows_the_label_at_every_scale() {
     for scale in SCALES {
         let mut rig = Rig::full();
         rig.ctx.set_pixels_per_point(scale);
+        // "Allow calls" adds a subtitle while it is on; off, it is a plain
+        // short row, as "Voice calls" was when this check was written.
+        rig.ui.switches.receive_calls = false;
         rig.ui.page = Page::Settings;
         rig.size = egui::vec2(1400.0 / scale, 6000.0);
-        let row = rig.bounds("Voice calls", Some(Role::CheckBox));
-        let info = rig.bounds("About Voice calls", Some(Role::Button));
+        let row = rig.bounds("Allow calls", Some(Role::CheckBox));
+        let info = rig.bounds("About Allow calls", Some(Role::Button));
         assert!(info.center().x < row.left() + 240.0, "{scale}: (i) right after the short label: {info:?} in {row:?}");
         assert!((info.center().y - row.center().y).abs() < 4.0, "{scale}: on the label's line");
         // Narrow window: a long label wraps; the (i) sits on its last line.
-        rig.size = egui::vec2(400.0, 6000.0);
-        let label = "Friendly names for nearby phones";
+        rig.size = egui::vec2(320.0, 6000.0);
+        rig.ui.settings_page = SettingsPage::Privacy;
+        let label = "Block unknown callers";
         let row = rig.bounds(label, Some(Role::CheckBox));
         let info = rig.bounds(&format!("About {label}"), Some(Role::Button));
         assert!(row.height() > super::theme::ROW_HEIGHT + 1.0, "{scale}: the wrapped row grows: {row:?}");
@@ -1691,7 +2281,7 @@ fn the_info_button_follows_the_label_at_every_scale() {
 }
 
 /// Every row in every Settings card has a divider above it except the first,
-/// nested groups included (Preview and diagnostics open), at every scale,
+/// on the top page and the Experiments page, at every scale,
 /// and never two lines between the same rows.
 #[test]
 fn every_settings_row_has_exactly_one_divider_from_its_neighbour_at_every_scale() {
@@ -1701,7 +2291,7 @@ fn every_settings_row_has_exactly_one_divider_from_its_neighbour_at_every_scale(
         rig.ctx.set_pixels_per_point(scale);
         rig.ui.page = Page::Settings;
         rig.size = egui::vec2(1000.0, 6000.0);
-        rig.click("Preview and diagnostics");
+        rig.ui.settings_page = SettingsPage::Experiments;
         let _ = rig.frame(vec![]);
         let output = rig.frame(vec![]);
         let update = output.platform_output.accesskit_update.clone().expect("AccessKit");
@@ -1714,7 +2304,7 @@ fn every_settings_row_has_exactly_one_divider_from_its_neighbour_at_every_scale(
             .map(|(label, y0, y1, _)| (label, y0, y1))
             .collect();
         rows.sort_by(|a, b| a.1.total_cmp(&b.1));
-        assert!(rows.iter().any(|r| r.0 == "Show GPU texture test"), "the nested group is open: {rows:?}");
+        assert!(rows.iter().any(|r| r.0 == "Show GPU texture test"), "the Experiments page: {rows:?}");
         let lines: Vec<f32> = output
             .shapes
             .iter()
@@ -1794,7 +2384,7 @@ fn without_streams_live_stays_and_says_why() {
     assert!(!rig.has(super::screens::STREAMS_NOT_HERE));
 }
 
-/// The switches no part of the PC reads are hidden (values kept); the real
+/// The switches no part of the PC reads are gone; the real
 /// ones carry Android's names; Start with Windows is off and reaches the core.
 #[test]
 fn settings_show_only_wired_switches_with_android_names() {
@@ -1803,6 +2393,7 @@ fn settings_show_only_wired_switches_with_android_names() {
     rig.ui.page = Page::Settings;
     for hidden in [
         "Visible to contacts",
+        "Friendly names for nearby phones",
         "Show my name before they answer",
         "Codes that expire when you add a contact",
         "Accept older verification codes",
@@ -1812,28 +2403,36 @@ fn settings_show_only_wired_switches_with_android_names() {
         assert!(!rig.contains(hidden), "{hidden} is not shown");
     }
     assert!(rig.has("Allow calls"));
-    assert!(rig.contains("Your name is never broadcast. It's sent, encrypted, to people you call and to contacts who call you."));
+    assert!(rig.contains(super::NAME_AUDIENCE), "the name note is shown");
     assert!(!rig.ui.switches.start_with_windows, "off by default");
     rig.click("Start with Windows");
     match rig.log().last().unwrap() {
         Command::Switches(s) => assert!(s.start_with_windows),
         other => panic!("{other:?}"),
     }
-    // Hidden switches keep their saved values.
-    rig.ui.switches.visible_by_name = true;
-    rig.click("Play ringing tone");
-    match rig.log().last().unwrap() {
-        Command::Switches(s) => assert!(s.visible_by_name),
-        other => panic!("{other:?}"),
-    }
 }
 
-/// An empty Calls list says what the phone needs to find this PC.
+/// An empty Calls list says what a phone needs to show up here.
 #[test]
-fn the_empty_calls_list_says_how_a_phone_finds_this_pc() {
+fn the_empty_calls_list_says_what_a_phone_needs_to_show_up() {
     let mut rig = Rig::full();
     rig.ui.page = Page::Calls;
-    assert!(rig.contains("Both phones need a current MeshLive. On the phone: Settings \u{203a} Advanced \u{203a} Connection \u{203a} turn on Find PCs."));
+    assert!(rig.contains(super::NOBODY_NEARBY_HINT));
+}
+
+/// The welcome, the name dialog and Settings make the same statement about
+/// who sees the name.
+#[test]
+fn every_place_that_asks_for_the_name_says_who_sees_it() {
+    let mut rig = Rig::full();
+    rig.ui.switches.onboarded = false;
+    assert!(rig.contains(super::NAME_WHO), "the welcome");
+    rig.ui.switches.onboarded = true;
+    rig.ui.page = Page::Settings;
+    rig.size = egui::vec2(1000.0, 3600.0);
+    assert!(rig.contains(super::NAME_AUDIENCE), "the Settings note");
+    rig.click(&format!("Your name, {}", super::NAME_NOT_SET));
+    assert!(rig.contains(super::NAME_WHO), "the name dialog");
 }
 
 /// The video call screen fits the window at any size and display scale (the
@@ -1899,23 +2498,20 @@ fn the_video_call_screen_fits_the_window_with_controls_and_self_view() {
 
 
 /// A stranger who calls this PC shows the made-up name of its throwaway key
-/// (Android `strangerGeneratedName`), not "Someone nearby"; with Friendly
-/// names off, or once its name label arrives, that wins instead.
+/// (Android `strangerGeneratedName`), not "Someone nearby", until its name
+/// label arrives.
 #[test]
 fn a_stranger_caller_shows_its_generated_name() {
-    for friendly in [true, false] {
-        let mut rig = Rig::full();
-        rig.ui.switches.generated_names = friendly;
-        rig.ui.switches.receive_calls = true;
-        rig.send(Update::IncomingCall { peer: "Someone nearby".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: None });
-        rig.send(Update::CallPeerGenerated("Gold Fox".into()));
-        rig.ui.pump();
-        assert_eq!(rig.has("Gold Fox"), friendly, "friendly={friendly}");
-        assert_eq!(rig.has("Someone nearby"), !friendly);
-        rig.send(Update::CallPeerName("Asha".into()));
-        assert!(rig.has("Asha"), "a signed name label replaces it");
-        rig.ui.call = None;
-    }
+    let mut rig = Rig::full();
+    rig.ui.switches.receive_calls = true;
+    rig.send(Update::IncomingCall { peer: "Someone nearby".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: None });
+    rig.send(Update::CallPeerGenerated("Gold Fox".into()));
+    rig.ui.pump();
+    assert!(rig.has("Gold Fox"));
+    assert!(!rig.has("Someone nearby"));
+    rig.send(Update::CallPeerName("Asha".into()));
+    assert!(rig.has("Asha"), "a signed name label replaces it");
+    rig.ui.call = None;
     // A verified caller keeps the contact's name.
     let mut rig = Rig::full();
     rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: None });
@@ -1937,8 +2533,8 @@ fn a_throwaway_node_id_names_like_android() {
 }
 
 
-/// Streams this PC can't watch (a phone without Private Bluetooth ID) don't
-/// fill Live with greyed-out rows: the watchable ones are listed, the rest
+/// Streams this PC can't watch (a phone with an older MeshLive) don't fill
+/// Live with greyed-out rows: the watchable ones are listed, the rest
 /// wait behind one plain line with what to ask, and "Show them" lists them.
 #[test]
 fn unwatchable_streams_fold_behind_one_plain_line() {
@@ -1973,8 +2569,10 @@ fn the_bitrate_slider_keeps_its_size_and_its_value_stays_off_it() {
     for width in [640.0, 1000.0, 1536.0] {
         let mut rig = Rig::full();
         rig.size = egui::vec2(width, 1400.0);
-        rig.ui.live_consent_required = true;
-        rig.ui.open_go_live();
+        // The slider is in Settings > Manual video since WP11 (Android).
+        rig.ui.page = Page::Settings;
+        rig.ui.settings_page = SettingsPage::Manual;
+        rig.ui.manual_video = true;
         let mut slider_rects = vec![];
         for kbps in [100, 1500, 525] {
             rig.ui.live_settings.kbps = kbps;
@@ -1997,4 +2595,919 @@ fn the_bitrate_slider_keeps_its_size_and_its_value_stays_off_it() {
             assert!((r.left() - slider_rects[0].left()).abs() < 0.5, "{width}: it doesn't move");
         }
     }
+}
+
+/// Contact us (Settings, About and updates) and Report a bug (Help and
+    /// feedback) each open one email draft to MeshLive (Android `contactUsRow`;
+    /// Report a bug as the same draft, owner scope); neither is a concern draft.
+    #[test]
+    fn contact_us_and_report_a_bug_each_open_one_mail_draft() {
+        use meshlive::reporting::Draft;
+        use super::report::{CONTACT_US, CONTACT_US_SUBTITLE, REPORT_BUG};
+        let drafts = |rig: &Rig| rig.log().iter().filter(|c| **c == Command::OpenMailDraft(Draft::Contact)).count();
+        let mut rig = Rig::full();
+        rig.size = egui::vec2(1000.0, 3000.0);
+        rig.ui.page = Page::Settings;
+        assert_eq!(drafts(&rig), 0);
+        rig.click(&format!("{CONTACT_US}, {CONTACT_US_SUBTITLE}"));
+        assert_eq!(drafts(&rig), 1, "one draft per press");
+        rig.click(SettingsPage::Help.title());
+        rig.click(REPORT_BUG);
+        assert_eq!(drafts(&rig), 2);
+        assert!(!rig.log().contains(&Command::OpenMailDraft(Draft::Concern)), "only a report drafts a concern");
+    }
+
+    /// No email app took the draft (Android `ContactEmailUi`): the address is
+    /// shown; Copy puts it on the clipboard and says Copied; Close copies nothing.
+    #[test]
+    fn a_missing_email_app_shows_the_address_to_copy() {
+        use meshlive::reporting::ADDRESS;
+        use super::report::COPIED;
+        let mut rig = Rig::full();
+        rig.ui.page = Page::Contacts;
+        rig.send(Update::MailDraftFailed);
+        rig.ui.pump();
+        assert!(rig.ui.mail_fallback);
+        assert!(rig.has(ADDRESS), "the address is shown");
+        rig.click("Copy");
+        assert_eq!(rig.ui.take_clipboard_request(), Some(ADDRESS.to_owned()));
+        assert!(!rig.ui.mail_fallback, "the dialog closes");
+        assert_eq!(rig.ui.block_note.as_deref(), Some(COPIED));
+        // The note has its own Close; clear it so only the dialog's is on screen.
+        rig.ui.block_note = None;
+        rig.send(Update::MailDraftFailed);
+        rig.ui.pump();
+        rig.click("Close");
+        assert!(!rig.ui.mail_fallback);
+        assert_eq!(rig.ui.take_clipboard_request(), None, "Close copies nothing");
+    }
+
+/// Report on a contact (Android `contactRowReport`): blocks without asking,
+/// then "Blocked and hidden" offers Tell MeshLive (a concern draft) or Close
+/// (no draft); an already blocked person gets the same; a failed block says
+/// so and offers no draft.
+#[test]
+fn report_on_a_contact_blocks_without_asking_then_offers_tell_meshlive() {
+    use meshlive::{blocking::BlockChange, reporting::Draft};
+    use super::blocked::{BlockFrom, change_note};
+    use super::report::{REPORT_DONE, TELL_MESHLIVE};
+    let concern = |rig: &Rig| rig.log().iter().filter(|c| **c == Command::OpenMailDraft(Draft::Concern)).count();
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.page = Page::Contacts;
+    rig.ui.contact_more = None;
+    rig.click("More for Ravi");
+    rig.click("Report Ravi");
+    assert!(rig.ui.block_confirm.is_none(), "Report does not ask (Android)");
+    assert_eq!(rig.log().last(), Some(&Command::SetBlocked { contact: 12, blocked: true }));
+    rig.send(Update::BlockChanged { fingerprint: [12; 32], name: "Ravi".into(), change: BlockChange::Blocked });
+    rig.ui.pump();
+    assert!(rig.ui.report_done);
+    assert!(rig.contains(REPORT_DONE));
+    assert!(rig.ui.block_note.is_none(), "the dialog says it, not a second note");
+    assert_eq!(concern(&rig), 0, "nothing is drafted until asked");
+    rig.click(TELL_MESHLIVE);
+    assert_eq!(concern(&rig), 1);
+    assert!(!rig.ui.report_done, "the dialog closes");
+    // Already blocked: the same dialog; Close drafts nothing.
+    rig.click("More for Ravi");
+    rig.click("Report Ravi");
+    rig.send(Update::BlockChanged { fingerprint: [12; 32], name: "Ravi".into(), change: BlockChange::AlreadyBlocked });
+    rig.ui.pump();
+    assert!(rig.ui.report_done);
+    rig.click("Close");
+    assert!(!rig.ui.report_done);
+    assert_eq!(concern(&rig), 1, "Close drafts nothing");
+    // A failed block: no dialog, the failure is said.
+    rig.click("More for Ravi");
+    rig.click("Report Ravi");
+    rig.send(Update::BlockChanged { fingerprint: [12; 32], name: "Ravi".into(), change: BlockChange::Failed });
+    rig.ui.pump();
+    assert!(!rig.ui.report_done, "a failure is never shown as reported");
+    assert_eq!(rig.ui.block_note, Some(change_note(BlockFrom::Report, BlockChange::Failed, "Ravi")));
+}
+
+/// Report on the ring screen (Android `declineAndReportButton`): declines,
+/// then blocks the caller without asking and offers Tell MeshLive; never
+/// offered for a one-time ID.
+#[test]
+fn report_on_the_ring_screen_declines_then_blocks_and_offers_tell_meshlive() {
+    use meshlive::{blocking::BlockChange, reporting::Draft};
+    use super::report::{REPORT, TELL_MESHLIVE};
+    let mut rig = Rig::full();
+    rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some([5; 32]) });
+    rig.ui.pump();
+    rig.click(REPORT);
+    assert!(rig.signals().contains(&Signal::Decline), "the call is declined");
+    assert!(rig.log().contains(&Command::BlockCaller { fingerprint: [5; 32], blocked: true }), "then the caller is blocked");
+    assert!(rig.ui.block_confirm.is_none(), "without asking (Android)");
+    assert_eq!(rig.ui.call.as_ref().unwrap().phase(), Phase::Ended);
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Priya".into(), change: BlockChange::Blocked });
+    rig.ui.pump();
+    assert!(rig.ui.report_done);
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::OpenMailDraft(_))), "nothing is drafted until asked");
+    rig.click(TELL_MESHLIVE);
+    assert!(rig.log().contains(&Command::OpenMailDraft(Draft::Concern)));
+    assert!(!rig.ui.report_done);
+    rig.click("Back");
+    let other = [0x77; 16];
+    rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(other, Signal::Invite), fingerprint: None });
+    rig.ui.pump();
+    assert!(rig.has("Decline") && !rig.has(REPORT), "a one-time ID can't be reported one by one");
+}
+
+/// Report while listening or watching (Android `audioListenReport`; the
+/// viewer too, as Block this person): offered only once the source's key is
+/// authenticated; it blocks, hides this route and leaves, then offers Tell
+/// MeshLive.
+#[test]
+fn report_while_listening_or_watching_blocks_hides_leaves_and_offers_tell_meshlive() {
+    use meshlive::{blocking::BlockChange, reporting::Draft};
+    use super::report::{REPORT, TELL_MESHLIVE};
+    for id in [2, 1] {
+        let mut rig = Rig::full();
+        rig.populate();
+        assert!(rig.ui.start_watch(id));
+        rig.send(Update::Watch(WatchEvent::Connected));
+        assert!(!rig.has(REPORT), "no authenticated source key yet");
+        let route = meshlive::stream_watch::StreamRoute { logical: 1, prefix: [1; 6] };
+        rig.send(Update::WatchSource { id: rig.ui.watch_id.unwrap(), fingerprint: [7; 32], route });
+        rig.click(REPORT);
+        let log = rig.log();
+        let block_at = log.iter().position(|c| matches!(c, Command::BlockCaller { fingerprint, blocked: true } if *fingerprint == [7; 32])).unwrap();
+        assert_eq!(&log[block_at + 1..block_at + 3], &[
+            Command::HideWatchedStream { source: [7; 16], route },
+            Command::StopWatching,
+        ], "block, hide this route, then leave");
+        assert!(rig.ui.watch.is_none(), "it leaves");
+        rig.send(Update::BlockChanged { fingerprint: [7; 32], name: "Asha".into(), change: BlockChange::Blocked });
+        rig.ui.pump();
+        assert!(rig.ui.report_done);
+        rig.click(TELL_MESHLIVE);
+        assert!(rig.log().contains(&Command::OpenMailDraft(Draft::Concern)));
+    }
+}
+
+/// "Block %s?" offers Report as Android's neutral button (`confirmBlock`):
+/// from a contact and from Recent it reports (the dialog follows) instead
+/// of a plain block; Cancel still blocks nobody.
+#[test]
+fn the_block_question_offers_report_from_a_contact_and_from_recent() {
+    use meshlive::blocking::BlockChange;
+    use super::report::REPORT;
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.page = Page::Contacts;
+    rig.ui.contact_more = None;
+    rig.click("More for Ravi");
+    rig.click("Block Ravi");
+    assert!(rig.ui.block_confirm.is_some());
+    rig.click(REPORT);
+    assert!(rig.ui.block_confirm.is_none(), "the question closes");
+    assert_eq!(rig.log().last(), Some(&Command::SetBlocked { contact: 12, blocked: true }));
+    rig.send(Update::BlockChanged { fingerprint: [12; 32], name: "Ravi".into(), change: BlockChange::Blocked });
+    rig.ui.pump();
+    assert!(rig.ui.report_done, "a report, not a plain block");
+    rig.click("Close");
+    rig.send(Update::IncomingCall { peer: "Priya".into(), verified: true, invite: remote(ID, Signal::Invite), fingerprint: Some([5; 32]) });
+    rig.ui.pump();
+    rig.click("Decline");
+    rig.click("Back");
+    rig.ui.page = Page::Calls;
+    rig.ui.recent_tab = true;
+    rig.click("Block Priya");
+    rig.click("Cancel");
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::BlockCaller { .. })), "Cancel blocks nobody");
+    rig.click("Block Priya");
+    rig.click(REPORT);
+    assert!(rig.log().contains(&Command::BlockCaller { fingerprint: [5; 32], blocked: true }));
+    rig.send(Update::BlockChanged { fingerprint: [5; 32], name: "Priya".into(), change: BlockChange::Blocked });
+    rig.ui.pump();
+    assert!(rig.ui.report_done);
+}
+
+/// Android's Add contact segments: it opens on "Scan their code"; "Show my
+/// code" shows only this PC's code and closes the camera; the window stays
+/// out of captures on both segments while Add contact is open.
+#[test]
+fn add_contact_shows_one_segment_at_a_time() {
+    use super::screens::{SEG_SCAN, SEG_SHOW};
+    let mut rig = Rig::full();
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    rig.click("Add contact");
+    rig.send(Update::OwnCode(Some("BVMID2.ABC".into())));
+    assert!(rig.has("Scan with camera") && !rig.has("Your code as a QR code"), "opens on Scan their code");
+    rig.click("Scan with camera");
+    assert!(rig.ui.meet.as_ref().unwrap().camera);
+    rig.click(SEG_SHOW);
+    assert!(rig.has("Your code as a QR code") && !rig.has("Scan with camera"));
+    assert!(rig.log().contains(&Command::QrCamera(false)), "the camera closes with its segment");
+    assert!(rig.ui.code_on_screen());
+    rig.click(SEG_SCAN);
+    assert!(!rig.has("Your code as a QR code"));
+    assert!(rig.ui.code_on_screen(), "still out of captures while Add contact is open");
+}
+
+/// "Save contact as" (Android `ContactNames.suggestion`): your label for a
+/// contact you scan again, else empty, never their ID; empty can be saved
+/// and keeps their ID.
+#[test]
+fn save_contact_as_starts_with_your_label_or_empty_never_an_id() {
+    let mut rig = Rig::full();
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    rig.send(Update::Contacts(vec![Contact { id: 20, name: "Asha".into(), lease: true, handle: "7KQ2M-4ZD80".into(), ..Default::default() }]));
+    rig.click("Add contact");
+    rig.ui.meet.as_mut().unwrap().code = "BVMID2.THEIRS".into();
+    rig.click("Scan code");
+    rig.send(Update::Meet(MeetEvent::Ask { name: "7KQ2M-4ZD80".into() }));
+    assert!(rig.has(super::screens::SAVE_AS));
+    assert_eq!(rig.ui.meet.as_ref().unwrap().name, "Asha", "your label for a contact you scan again");
+    rig.click("No");
+    rig.ui.close_meet();
+    rig.click("Add contact");
+    rig.ui.meet.as_mut().unwrap().code = "BVMID2.OTHER".into();
+    rig.click("Scan code");
+    rig.send(Update::Meet(MeetEvent::Ask { name: "9XW3P-1BC77".into() }));
+    assert_eq!(rig.ui.meet.as_ref().unwrap().name, "", "never their ID");
+    rig.click("Yes, it is");
+    assert!(rig.log().contains(&Command::ConfirmScan { yes: true, name: String::new() }), "empty keeps their ID");
+}
+
+/// Android's contact sheet (`ContactActions`): the row or its info button
+/// opens it; it has no Voice or Video rows (calls start from the row); a
+/// contact checked by code only offers "Scan to confirm", which opens Add
+/// contact on "Scan their code"; Escape closes the sheet.
+#[test]
+fn a_contact_opens_its_sheet_without_call_rows_and_a_code_only_contact_offers_scan_to_confirm() {
+    use super::contact_sheet::{SCAN_CONFIRM, detail};
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.page = Page::Contacts;
+    let row = format!("Priya, {}", rig.ui.contacts[0].subtitle());
+    rig.click(&row);
+    assert_eq!(rig.ui.contact_more, Some(10), "the row opens the sheet");
+    for action in ["Rename Priya", "Safety code with Priya", "Block Priya", "Report Priya", "Forget Priya"] {
+        assert!(rig.has(action), "{action}");
+    }
+    assert!(!rig.has("Voice call") && !rig.has("Video call"), "no call rows (Android hides them)");
+    assert!(!rig.has(SCAN_CONFIRM), "a scanned contact needs no confirmation");
+    let escape = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+    let _ = rig.frame(vec![escape]);
+    let _ = rig.frame(vec![]);
+    assert_eq!(rig.ui.contact_more, None, "Escape closes it");
+    rig.click("More for Ravi");
+    let ravi = detail(&rig.ui.contacts[1]);
+    assert!(rig.contains(&ravi), "how they were verified");
+    rig.click(SCAN_CONFIRM);
+    assert_eq!(rig.ui.contact_more, None, "the row closes the sheet first");
+    assert!(rig.ui.meet.as_ref().is_some_and(|m| !m.show_code), "Add contact on Scan their code");
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::SetBlocked { .. } | Command::RenameContact { .. } | Command::ForgetContact(_))), "nothing about the contact changed");
+}
+
+/// The claimed-name offer (Android `bindClaim`): a new name they call
+/// themselves is only a note until "Use it as my label" (the contact layer
+/// renames them and the page says so) or "Ignore"; it never verifies them.
+#[test]
+fn a_claimed_name_is_offered_on_the_sheet_and_used_only_when_chosen() {
+    use super::contact_sheet::{IGNORE_CLAIM, SCAN_CONFIRM, USE_CLAIM, claim_text};
+    let mut rig = Rig::full();
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    let ravi = Contact { id: 12, name: "Ravi".into(), lease: true, claim: Some(ClaimNote::Changed("Ravi K".into())), ..Default::default() };
+    rig.send(Update::Contacts(vec![ravi.clone()]));
+    rig.click("More for Ravi");
+    assert!(rig.contains(&claim_text(&ravi).unwrap()));
+    rig.click(IGNORE_CLAIM);
+    assert_eq!(rig.log().last(), Some(&Command::ClaimedName { contact: 12, use_it: false }));
+    assert_eq!(rig.ui.contact_more, None);
+    rig.click("More for Ravi");
+    rig.click(USE_CLAIM);
+    assert_eq!(rig.log().last(), Some(&Command::ClaimedName { contact: 12, use_it: true }));
+    assert!(!rig.log().iter().any(|c| matches!(c, Command::RenameContact { .. })), "the contact layer renames, from the stored claim");
+    rig.send(Update::Renamed { contact: 12, outcome: RenameOutcome::Renamed });
+    rig.ui.pump();
+    assert!(rig.ui.block_note.as_deref().is_some_and(|note| note.contains("Ravi K")), "it says what it saved");
+    // Seen: "They call themselves" only, no offer; still checked by code only.
+    let seen = Contact { claim: Some(ClaimNote::CallsThemselves("Ravi K".into())), ..ravi };
+    rig.send(Update::Contacts(vec![seen.clone()]));
+    rig.click("More for Ravi");
+    assert!(rig.contains(&claim_text(&seen).unwrap()));
+    assert!(!rig.has(USE_CLAIM) && !rig.has(IGNORE_CLAIM));
+    assert!(rig.has(SCAN_CONFIRM), "Scan to confirm stays until they are scanned");
+}
+
+/// A contact this PC can't recognise yet (Android `bindRecognitionHint`):
+/// "Show my code" opens Add contact on this PC's code; after you scanned
+/// each other, "Scan again" opens it on "Scan their code".
+#[test]
+fn a_contact_this_pc_cannot_recognise_offers_show_my_code_or_scan_again() {
+    use super::contact_sheet::{SCAN_AGAIN, SHOW_MY_CODE};
+    let mut rig = Rig::full();
+    rig.ui.pump();
+    rig.ui.page = Page::Contacts;
+    let asha = Contact { id: 20, name: "Asha".into(), by_qr: true, lease: false, ..Default::default() };
+    rig.send(Update::Contacts(vec![asha.clone()]));
+    rig.click("More for Asha");
+    assert!(!rig.has(SCAN_AGAIN));
+    rig.click(SHOW_MY_CODE);
+    assert!(rig.ui.meet.as_ref().is_some_and(|m| m.show_code), "Add contact on Show my code");
+    assert!(rig.log().contains(&Command::ShowOwnCode));
+    rig.ui.close_meet();
+    rig.send(Update::Contacts(vec![Contact { both_ways: true, ..asha }]));
+    rig.click("More for Asha");
+    assert!(!rig.has(SHOW_MY_CODE));
+    rig.click(SCAN_AGAIN);
+    assert!(rig.ui.meet.as_ref().is_some_and(|m| !m.show_code), "Add contact on Scan their code");
+}
+
+/// An incoming call closes the open contact sheet (Android F15), so the
+/// ring screen is never covered.
+#[test]
+fn an_incoming_call_closes_the_contact_sheet() {
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.page = Page::Contacts;
+    rig.click("More for Ravi");
+    assert_eq!(rig.ui.contact_more, Some(12));
+    rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: None });
+    let _ = rig.frame(vec![]);
+    let _ = rig.frame(vec![]);
+    assert_eq!(rig.ui.contact_more, None);
+    assert!(rig.has("Accept"), "the ring screen is not covered");
+}
+
+#[test]
+fn video_live_has_mute_camera_end_flip_pause_with_end_in_the_middle_and_a_timer() {
+    let mut rig = Rig::full();
+    rig.ui.open_go_live();
+    rig.ui.golive.title = "Market".into();
+    rig.click("Go live");
+    rig.send(Update::Live(LiveEvent::Started));
+    let centre = |rig: &mut Rig, name: &str| rig.bounds(name, None).center();
+    let xs: Vec<f32> = ["Mute", "Camera off", "Stop broadcast", "Pause"].iter().map(|n| centre(&mut rig, n).x).collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "Android's order: {xs:?}");
+    assert!(!rig.has("Switch camera"), "one camera: Flip's place stays empty");
+    assert!((xs[2] - (xs[0] + xs[3]) / 2.0).abs() < 1.0, "End in the middle: {xs:?}");
+    assert!(rig.painted(&live_timer(0)));
+    rig.ui.clock_offset = std::time::Duration::from_secs(125);
+    assert!(rig.painted(&live_timer(125)), "the timer runs from going live");
+    rig.click("Pause");
+    assert!(rig.disabled("Mute") && rig.disabled("Camera off"), "nothing is captured while paused");
+    assert_eq!(centre(&mut rig, "Stop broadcast").x, xs[2], "End does not move");
+    rig.click("Resume");
+    rig.click("Stop broadcast");
+    assert!(rig.log().contains(&Command::StopLive));
+}
+
+#[test]
+fn audio_only_live_shows_the_level_listeners_and_timer_and_switches_to_video_with_the_same_title() {
+    let mut rig = Rig::full();
+    rig.ui.golive_open = true;
+    rig.click("Audio only");
+    rig.ui.golive.title = "Evening news".into();
+    rig.click("Go live");
+    rig.click("Go live with audio");
+    rig.send(Update::Live(LiveEvent::Started));
+    rig.send(Update::Live(LiveEvent::Viewers(2)));
+    assert!(rig.has("Live. 2 listening"));
+    assert!(rig.has("Microphone level"));
+    rig.send(Update::LiveLevel(0.6));
+    rig.ui.pump();
+    assert_eq!(rig.ui.golive.level, 0.6);
+    assert!(rig.painted(&live_timer(0)));
+    let xs: Vec<f32> = ["Mute", "Stop broadcast", "Pause"].iter().map(|n| rig.bounds(n, None).center().x).collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]) && (xs[1] - (xs[0] + xs[2]) / 2.0).abs() < 1.0, "Mute, End, Pause: {xs:?}");
+    rig.click("Switch to video");
+    let log = rig.log();
+    let stop = log.iter().position(|c| *c == Command::StopLive).expect("the radio broadcast ends");
+    assert!(matches!(&log[stop + 1], Command::GoLive { kind: LiveKind::Video, title, .. } if title == "Evening news"),
+        "then video starts with the same title: {:?}", &log[stop..]);
+    rig.send(Update::Live(LiveEvent::Started));
+    assert!(rig.has("Camera off") && !rig.has("Switch to video"));
+}
+
+#[test]
+fn a_forgotten_audio_broadcast_reminds_then_stops_and_an_answer_keeps_it_going() {
+    let short = ReminderLimits {
+        no_listener: std::time::Duration::from_secs(30),
+        total: std::time::Duration::from_secs(120),
+        unanswered_stop: std::time::Duration::from_secs(5),
+    };
+    let mut rig = Rig::full();
+    rig.ui.live_limits = short;
+    rig.ui.golive_open = true;
+    rig.click("Audio only");
+    rig.click("Go live");
+    rig.click("Go live with audio");
+    rig.send(Update::Live(LiveEvent::Started));
+    rig.ui.pump();
+    rig.ui.page = Page::Calls;
+    rig.ui.golive_open = false;
+    let at = |rig: &mut Rig, secs: u64| { rig.ui.clock_offset = std::time::Duration::from_secs(secs); rig.ui.pump(); };
+    at(&mut rig, 29);
+    assert!(!rig.has("Keep broadcasting"));
+    at(&mut rig, 31);
+    assert!(rig.has("Keep broadcasting"), "30 (shortened) with nobody listening: the reminder, on any page");
+    assert!(rig.ui.take_live_reminder_alert(), "the window is asked to announce it");
+    assert!(!rig.ui.take_live_reminder_alert(), "once");
+    rig.click("Keep broadcasting");
+    assert!(rig.ui.golive.running() && !rig.has("Keep broadcasting"), "an answer keeps it going");
+    at(&mut rig, 50);
+    assert!(!rig.has("Keep broadcasting"), "the clocks started again at the answer");
+    at(&mut rig, 62);
+    assert!(rig.has("Keep broadcasting"));
+    at(&mut rig, 68);
+    assert!(!rig.ui.golive.running(), "5 (shortened) without an answer: stopped");
+    assert!(rig.log().contains(&Command::StopLive));
+    assert!(rig.contains(super::LIVE_REMINDER_STOPPED));
+    assert!(!rig.has("Keep broadcasting"));
+}
+
+#[test]
+fn a_heard_audio_broadcast_reminds_after_the_long_limit_and_stop_ends_it_but_video_never_reminds() {
+    let short = ReminderLimits {
+        no_listener: std::time::Duration::from_secs(30),
+        total: std::time::Duration::from_secs(120),
+        unanswered_stop: std::time::Duration::from_secs(5),
+    };
+    let mut rig = Rig::full();
+    rig.ui.live_limits = short;
+    rig.ui.golive_open = true;
+    rig.click("Audio only");
+    rig.click("Go live");
+    rig.click("Go live with audio");
+    rig.send(Update::Live(LiveEvent::Started));
+    rig.send(Update::Live(LiveEvent::Viewers(1)));
+    rig.ui.pump();
+    rig.ui.clock_offset = std::time::Duration::from_secs(119);
+    assert!(!rig.has("Keep broadcasting"), "someone is listening");
+    rig.ui.clock_offset = std::time::Duration::from_secs(121);
+    assert!(rig.has("Keep broadcasting"), "the long limit (shortened)");
+    rig.click("Stop");
+    assert!(!rig.ui.golive.running() && rig.log().contains(&Command::StopLive));
+    let mut video = Rig::full();
+    video.ui.live_limits = short;
+    video.ui.open_go_live();
+    video.click("Go live");
+    video.send(Update::Live(LiveEvent::Started));
+    video.ui.pump();
+    video.ui.clock_offset = std::time::Duration::from_secs(600);
+    assert!(!video.has("Keep broadcasting") && video.ui.golive.running(), "video has no reminder (Android)");
+}
+
+#[test]
+fn speaker_opens_the_audio_output_picker_and_the_pick_goes_to_the_call() {
+    let mut rig = Rig::full();
+    rig.populate(); rig.ui.pump();
+    assert!(rig.ui.place_call(10, true));
+    rig.send(Update::CallSignal(remote(ID, Signal::Accept)));
+    rig.send(Update::CallMediaReady);
+    let speakers = ("spk".to_owned(), "Speakers (Realtek)".to_owned());
+    let headset = ("hs".to_owned(), "Headset (Jabra)".to_owned());
+    rig.send(Update::CallOutputs { outputs: vec![speakers.clone()], current: Some("spk".into()) });
+    assert!(rig.disabled("Audio output"), "one output: nothing to choose");
+    rig.send(Update::CallOutputs { outputs: vec![speakers, headset], current: Some("spk".into()) });
+    rig.click("Audio output");
+    assert!(rig.has("Speakers (Realtek), Selected") && rig.has("Headset (Jabra)"));
+    rig.click("Headset (Jabra)");
+    assert_eq!(rig.log().last(), Some(&Command::CallOutput("hs".into())));
+    assert!(!rig.has("Headset (Jabra)"), "a pick closes the sheet");
+    rig.click("Audio output");
+    assert!(rig.has("Headset (Jabra), Selected"));
+    rig.click("Headset (Jabra), Selected");
+    rig.click("End call");
+    assert!(!rig.has("Audio output"), "the picker goes with the call");
+}
+
+#[test]
+fn flip_switches_the_camera_only_with_two_cameras_and_the_camera_on() {
+    let mut rig = Rig::full();
+    rig.populate(); rig.ui.pump();
+    assert!(rig.ui.place_call(10, false));
+    rig.send(Update::CallSignal(remote(ID, Signal::Accept)));
+    rig.send(Update::CallMediaReady);
+    rig.send(Update::CallCamera(None));
+    rig.send(Update::Cameras(1));
+    assert!(rig.disabled("Switch camera"), "one camera: the slot stays, disabled");
+    rig.send(Update::Cameras(2));
+    rig.click("Switch camera");
+    assert_eq!(rig.log().last(), Some(&Command::SwitchCamera));
+    rig.click("Video off");
+    assert!(rig.disabled("Switch camera"), "camera off: nothing to flip");
+    let mut live = Rig::full();
+    live.send(Update::Cameras(2));
+    live.ui.pump();
+    live.ui.open_go_live();
+    live.click("Go live");
+    live.send(Update::Live(LiveEvent::Started));
+    live.click("Switch camera");
+    assert_eq!(live.log().last(), Some(&Command::SwitchCamera));
+    live.click("Camera off");
+    assert!(live.disabled("Switch camera"));
+}
+
+#[test]
+fn the_radio_listener_shows_the_sound_level_and_video_does_not() {
+    let mut rig = Rig::full();
+    rig.populate(); rig.ui.pump();
+    assert!(rig.ui.start_watch(2));
+    rig.send(Update::Watch(WatchEvent::Connected));
+    rig.send(Update::WatchLevel(0.5));
+    assert!(rig.has("Sound level"));
+    assert_eq!(rig.ui.watch_level, 0.5);
+    rig.ui.leave_watch();
+    assert!(rig.ui.start_watch(1));
+    assert_eq!(rig.ui.watch_level, 0.0, "a new watch starts silent");
+    assert!(!rig.has("Sound level"), "video has no meter");
+}
+
+#[test]
+fn declining_a_one_time_caller_offers_block_unknown_callers_until_not_now() {
+    let ring = |rig: &mut Rig, fingerprint: Option<[u8; 32]>| {
+        rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint });
+        rig.ui.pump();
+    };
+    let mut rig = Rig::full();
+    ring(&mut rig, None);
+    rig.click("Decline");
+    assert!(rig.signals().contains(&Signal::Decline));
+    assert!(rig.contains(super::blocked::DECLINED_OFFER));
+    rig.click("Not now");
+    assert!(rig.ui.switches.block_unknown_offer_dismissed && !rig.ui.switches.block_unknown);
+    assert!(matches!(rig.log().last(), Some(Command::Switches(s)) if s.block_unknown_offer_dismissed), "Not now is saved");
+    rig.click("Back");
+    ring(&mut rig, None);
+    rig.click("Decline");
+    assert!(!rig.contains(super::blocked::DECLINED_OFFER), "never asked again");
+    let mut on = Rig::full();
+    ring(&mut on, None);
+    on.click("Decline");
+    on.click(super::blocked::TURN_ON_UNKNOWN);
+    assert!(on.ui.switches.block_unknown);
+    assert!(matches!(on.log().last(), Some(Command::Switches(s)) if s.block_unknown), "Block unknown callers is turned on and saved");
+    let mut real = Rig::full();
+    ring(&mut real, Some([3; 32]));
+    real.click("Decline");
+    assert!(!real.contains(super::blocked::DECLINED_OFFER), "a caller with a real key can be blocked by itself");
+}
+
+// ------------------------------------------------------------- WP11 polish
+
+/// Lists show the full verified check only for a contact scanned in person
+/// (Android `DisplayIdentity`: the shield, or "Checked by code" for a contact
+/// only checked by code), in Contacts and in Calls > Nearby alike.
+#[test]
+fn only_contacts_scanned_in_person_get_the_full_check_in_lists() {
+    let mut rig = Rig::full();
+    rig.populate();
+    // Ravi (checked by code only) comes into range too.
+    rig.send(Update::People(vec![
+        Person { id: 10, name: "Priya".into(), reach: Reach::Direct, verified: true, copied: false },
+        Person { id: 12, name: "Ravi".into(), reach: Reach::Direct, verified: true, copied: false },
+        Person { id: 11, name: "Blue Otter".into(), reach: Reach::Via(2), verified: false, copied: false },
+    ]));
+    rig.ui.pump();
+    assert!(rig.ui.scanned_in_person(10), "Priya was scanned in person: the full check");
+    assert!(!rig.ui.scanned_in_person(12), "Ravi was only checked by code: no full check");
+    assert!(!rig.ui.scanned_in_person(11), "a stranger is never marked");
+    rig.ui.page = Page::Calls;
+    assert!(rig.has(&format!("Ravi, Nearby \u{b7} {CHECKED_BY_CODE}")), "Calls > Nearby says how Ravi was checked");
+    assert!(!rig.contains(&format!("Priya, Nearby \u{b7} {CHECKED_BY_CODE}")));
+    rig.click("Video call Ravi");
+    assert_eq!(rig.ui.call.as_ref().unwrap().peer, "Ravi", "a contact checked by code is still called as before");
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.ui.page = Page::Contacts;
+    assert!(rig.has(&format!("Ravi, {CHECKED_BY_CODE}")), "the Contacts row says so too");
+}
+
+/// Types into the screen's only text field as a screen reader or voice
+/// input does (UI Automation SetValue).
+fn type_into_field(rig: &mut Rig, text: &str) {
+    use egui::accesskit::{Action, ActionData, ActionRequest, Role};
+    let _ = rig.frame(vec![]);
+    let output = rig.frame(vec![]);
+    let update = output.platform_output.accesskit_update.expect("AccessKit");
+    let (id, _) = update.nodes.iter().find(|(_, n)| n.role() == Role::TextInput).expect("a text field");
+    let request = ActionRequest { action: Action::SetValue, target: *id, data: Some(ActionData::Value(text.into())) };
+    let _ = rig.frame(vec![egui::Event::AccessKitActionRequest(request)]);
+    let _ = rig.frame(vec![]);
+}
+
+/// Calls > Nearby (Android `nearbyPeopleSearch`): with more than eight people
+/// "Search people" appears and keeps only the people whose name contains what
+/// was typed, contacts and strangers alike; with a few people there is none.
+#[test]
+fn calls_search_people_appears_for_a_long_list_and_keeps_matching_names() {
+    use egui::accesskit::Role;
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 3000.0);
+    rig.populate();
+    rig.ui.page = Page::Calls;
+    assert!(!rig.nodes().iter().any(|n| n.role == Role::TextInput), "two people: no search");
+    let mut people = vec![Person { id: 10, name: "Priya".into(), reach: Reach::Direct, verified: true, copied: false }];
+    for (i, name) in ["Blue Otter", "Gold Fox", "Red Kite", "Green Owl", "Grey Seal", "Pink Crab", "Tan Hare", "Jade Wren", "Prim Heron"].iter().enumerate() {
+        people.push(Person { id: 20 + i as Handle, name: (*name).into(), reach: Reach::Direct, verified: false, copied: false });
+    }
+    rig.send(Update::People(people));
+    rig.ui.pump();
+    type_into_field(&mut rig, "PRI");
+    assert_eq!(rig.ui.people_query, "PRI");
+    assert!(rig.has("Video call Priya") && rig.has("Video call Prim Heron"), "any case, contacts and strangers");
+    assert!(!rig.has("Video call Blue Otter") && !rig.has("Video call Gold Fox"), "the others are hidden");
+    rig.click("Video call Prim Heron");
+    assert_eq!(rig.ui.call.as_ref().unwrap().peer, "Prim Heron", "a found person is called as before");
+    rig.ui.call = None;
+    type_into_field(&mut rig, "");
+    assert!(rig.has("Video call Blue Otter") && rig.has("Video call Priya"), "an empty search shows everyone");
+}
+
+/// Recent (Android `RecentCalls.recordBlocked`): a call "Block unknown
+/// callers" declined is listed as a "Blocked call" with when it was declined,
+/// naming nobody and offering neither call back nor Block; other calls keep
+/// their actions.
+#[test]
+fn recent_lists_a_blocked_unknown_call_that_names_nobody() {
+    use super::screens::BLOCKED_CALL;
+    let mut rig = Rig::full();
+    rig.populate();
+    let ring = |rig: &mut Rig| {
+        rig.send(Update::IncomingCall { peer: "Blue Otter".into(), verified: false, invite: remote(ID, Signal::Invite), fingerprint: Some([3; 32]) });
+        rig.ui.pump();
+    };
+    ring(&mut rig);
+    rig.click("Decline");
+    rig.click("Back");
+    rig.send(Update::CallBlockedUnknown);
+    rig.ui.pump();
+    assert!(rig.ui.recent[0].declined_at.is_some() && rig.ui.recent[1].declined_at.is_none(), "newest first");
+    rig.ui.page = Page::Calls;
+    rig.ui.recent_tab = true;
+    assert!(rig.has(&format!("{BLOCKED_CALL}, Declined, just now")), "newest first, with when");
+    let blocks: Vec<String> = rig.nodes().into_iter().filter(|n| n.is_control() && n.text.starts_with("Block ")).map(|n| n.text).collect();
+    assert_eq!(blocks, ["Block Blue Otter"], "only the caller who showed a real key can be blocked; the blocked call offers no Block");
+    assert!(!rig.contains("Call back"), "and no call back");
+    rig.ui.clock_offset = std::time::Duration::from_secs(5 * 60);
+    assert!(rig.has(&format!("{BLOCKED_CALL}, Declined, 5 minutes ago")));
+}
+
+/// Settings > Video quality (Android `settingsRowVideo`) is Standard until
+/// Manual video settings is turned on in Settings > Manual video; Go live then
+/// sends exactly the chosen size and frame rate (its own screen has no video
+/// choices), and turning Manual off sends the default video again. Fill
+/// screen with video is on and saved when turned off.
+#[test]
+fn video_quality_is_auto_until_manual_video_settings_are_chosen() {
+    use meshlive::stream_source::Settings;
+    let configured = |rig: &Rig| rig.log().iter().rev().find_map(|c| match c { Command::ConfigureLive(s) => Some(*s), _ => None });
+    let go_live = |rig: &mut Rig| {
+        rig.ui.page = Page::Home;
+        rig.ui.open_go_live();
+        rig.click("Go live");
+        rig.click("Go live");
+    };
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 3000.0);
+    rig.ui.live_consent_required = true;
+    rig.ui.page = Page::Settings;
+    rig.click("Video quality, Standard");
+    assert_eq!(rig.ui.settings_page, SettingsPage::Video);
+    assert!(rig.ui.switches.video_fill, "Fill screen with video is on by default");
+    rig.click("Fill screen with video");
+    assert!(matches!(rig.log().last(), Some(Command::Switches(s)) if !s.video_fill), "turned off and saved");
+    rig.click("Back");
+    rig.click("Manual video");
+    assert!(!rig.has("640 \u{d7} 360"), "the choices show only with Manual video settings on");
+    rig.click("Manual video settings");
+    rig.click("640 \u{d7} 360");
+    rig.click("24 fps");
+    rig.click("Back");
+    assert!(rig.has("Video quality, Manual"));
+    go_live(&mut rig);
+    assert!(rig.ui.golive.running());
+    assert_eq!(configured(&rig), Some(Settings { width: 640, height: 360, fps: 24, ..Settings::default() }), "exactly what was chosen");
+    rig.ui.stop_live();
+    assert!(!rig.has("640 \u{d7} 360") && !rig.has("24 fps"), "Go live has no video choices of its own");
+    rig.ui.golive_open = false;
+    rig.ui.page = Page::Settings;
+    rig.click("Manual video");
+    rig.click("Manual video settings");
+    rig.click("Back");
+    assert!(rig.has("Video quality, Standard"));
+    go_live(&mut rig);
+    assert_eq!(configured(&rig), Some(Settings::default()), "Standard sends the default video again");
+}
+
+/// "Warn when video freezes" (Experimental, off; Android `ViewerFrameAge`):
+/// off nothing is added; on, a fresh picture shows how long ago it came, a
+/// picture that stopped for more than 1.5 s is dimmed as stalled until the
+/// next one, a broadcaster's pause is no freeze, and a lost signal says when
+/// the last picture came.
+#[test]
+fn warn_when_video_freezes_marks_a_stalled_picture_until_the_next_one() {
+    use std::time::Duration;
+    let publish = |slot: &meshlive::video::PictureSlot| slot.publish(64, 36, vec![120; 64 * 36 * 4], 0);
+    let watch = |rig: &mut Rig| {
+        let slot = std::sync::Arc::new(meshlive::video::PictureSlot::default());
+        assert!(rig.ui.start_watch(1));
+        rig.send(Update::Watch(WatchEvent::Connected));
+        rig.send(Update::CallPictures(PictureHandle(slot.clone())));
+        publish(&slot);
+        rig.ui.pump();
+        slot
+    };
+    let mut off = Rig::full();
+    off.populate();
+    let _slot = watch(&mut off);
+    off.ui.clock_offset = Duration::from_secs(3);
+    assert!(!off.painted(VIEWER_PICTURE_STALLED) && !off.painted("Last update"), "off by default: nothing added");
+
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 3000.0);
+    rig.populate();
+    rig.ui.page = Page::Settings;
+    rig.click("Video quality, Standard");
+    rig.click("Warn when video freezes");
+    assert!(matches!(rig.log().last(), Some(Command::Switches(s)) if s.frame_age), "turned on and saved");
+    rig.size = egui::vec2(1000.0, 720.0);
+    let slot = watch(&mut rig);
+    assert!(rig.painted("Last update <1 s ago"), "a fresh picture says how long ago it came");
+    rig.ui.clock_offset = Duration::from_secs(2);
+    assert!(rig.painted(VIEWER_PICTURE_STALLED) && rig.painted("Last picture "), "stopped for 2 s: stalled");
+    assert!(rig.has(WATCH_STATUS_STALLED), "and the status no longer says Live");
+    publish(&slot);
+    assert!(!rig.painted(VIEWER_PICTURE_STALLED) && rig.painted("Last update"), "the next picture clears it");
+    rig.send(Update::Watch(WatchEvent::Paused(true)));
+    rig.ui.pump();
+    rig.ui.clock_offset = Duration::from_secs(10);
+    assert!(!rig.painted(VIEWER_PICTURE_STALLED), "a pause is no freeze");
+    rig.send(Update::Watch(WatchEvent::Paused(false)));
+    rig.ui.pump();
+    assert!(!rig.painted(VIEWER_PICTURE_STALLED), "the stall clock restarts after the pause");
+    rig.send(Update::Watch(WatchEvent::Lost));
+    rig.ui.pump();
+    assert!(rig.painted(VIEWER_SIGNAL_LOST) && rig.painted("Last picture "), "a lost signal says when the last picture came");
+}
+
+/// The first run (Android `OnboardingActivity`): four pages with step dots;
+/// Back (or Escape) returns a page; on Start with Windows "Not now" leaves it
+/// off and "Allow" turns it on and saves it at once; Start finishes, once.
+#[test]
+fn the_first_run_pages_go_forward_and_back_and_offer_start_with_windows() {
+    let escape = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+    let mut rig = Rig::full();
+    rig.ui.switches.onboarded = false;
+    assert!(rig.has("Step 1 of 4"));
+    assert!(!rig.has("Back"), "nothing before the first page");
+    rig.click("Next");
+    assert!(rig.has("Step 2 of 4") && rig.contains("Bluetooth is ready."));
+    rig.click("Back");
+    assert!(rig.has("Step 1 of 4"), "Back returns a page");
+    rig.click("Next");
+    rig.click("Next");
+    assert!(rig.has("Step 3 of 4") && rig.has("Not now"));
+    let _ = rig.frame(vec![escape]);
+    let _ = rig.frame(vec![]);
+    assert!(rig.has("Step 2 of 4"), "Escape returns a page");
+    rig.click("Next");
+    rig.click("Not now");
+    assert!(rig.has("Step 4 of 4") && !rig.ui.switches.start_with_windows, "Not now leaves it off");
+    rig.click("Back");
+    rig.click("Allow");
+    assert!(rig.ui.switches.start_with_windows);
+    assert!(matches!(rig.log().last(), Some(Command::Switches(s)) if s.start_with_windows && !s.onboarded), "on and saved at once");
+    rig.click("Back");
+    assert!(rig.has("Next") && !rig.has("Allow"), "once on, the page only moves on");
+    rig.click("Next");
+    rig.click("Start");
+    assert!(rig.ui.switches.onboarded);
+    assert!(!rig.has("Step 4 of 4"), "shown once");
+}
+
+/// WP6: a call the core ended because the other person turned out to be
+/// someone you blocked ends on the call screen and says why there and in Recent.
+#[test]
+fn a_call_ended_by_a_revealed_block_says_so_on_the_call_and_in_recent() {
+    let mut rig = Rig::full();
+    rig.populate();
+    assert!(rig.ui.place_call(10, false));
+    rig.send(Update::CallEnded { reason: CallEndReason::BlockedPerson });
+    rig.ui.pump();
+    assert_eq!(rig.ui.call.as_ref().map(|c| c.phase()), Some(Phase::Ended));
+    assert_eq!(rig.ui.call_status().as_deref(), Some(CallEndReason::BlockedPerson.text()));
+    assert_eq!(rig.ui.recent[0].result, CallEndReason::BlockedPerson.text(), "Recent says the same");
+}
+
+/// 2026-11 Windows -> S22: the phone stopped receiving this PC while Windows
+/// Bluetooth here was not responding. The call ends saying so (on the call and
+/// in Recent), and the page keeps the way to fix it.
+#[test]
+fn a_call_dropped_by_this_pcs_stuck_bluetooth_says_so_and_offers_the_fix() {
+    let mut rig = Rig::full();
+    rig.populate();
+    rig.send(Update::BluetoothNotResponding(true));
+    assert!(rig.ui.place_call(10, false));
+    rig.send(Update::CallEnded { reason: CallEndReason::PcBluetoothNotResponding });
+    rig.ui.pump();
+    assert_eq!(rig.ui.call.as_ref().map(|c| c.phase()), Some(Phase::Ended));
+    assert_eq!(rig.ui.call_status().as_deref(), Some(CallEndReason::PcBluetoothNotResponding.text()));
+    assert_eq!(rig.ui.recent[0].result, CallEndReason::PcBluetoothNotResponding.text(), "Recent says the same");
+    assert_ne!(CallEndReason::PcBluetoothNotResponding.text(), CallEndReason::Ended.text(), "not a plain ending");
+    rig.ui.close_call();
+    rig.click("Open Bluetooth settings");
+    assert!(rig.log().contains(&Command::OpenBluetoothSettings));
+}
+
+/// WP4: "Who sees my name" shows only while a name is set; the current
+/// choice is marked; a pick is saved and sent with the switches; Cancel
+/// changes nothing.
+#[test]
+fn who_sees_my_name_shows_with_a_name_and_the_pick_goes_to_the_switches() {
+    use super::settings::{NAMES_AUDIENCE_TITLE, audience_text};
+    use meshlive::label_policy::NamesAudience;
+    let row = |audience| format!("{NAMES_AUDIENCE_TITLE}, {}", audience_text(audience));
+    let selected = |audience| format!("{}, Selected", audience_text(audience));
+    let mut rig = Rig::full();
+    rig.ui.switches.onboarded = true;
+    rig.ui.page = Page::Settings;
+    rig.size = egui::vec2(1000.0, 3600.0);
+    rig.ui.own_name = None;
+    assert!(!rig.has(&row(NamesAudience::Everyone)), "no name: no choice");
+    rig.ui.own_name = Some("Asha".into());
+    rig.click(&row(NamesAudience::Everyone));
+    assert!(rig.has(&selected(NamesAudience::Everyone)), "the current choice is marked");
+    rig.click(audience_text(NamesAudience::VerifiedOnly));
+    assert_eq!(rig.ui.switches.names_audience, NamesAudience::VerifiedOnly);
+    match rig.log().last().unwrap() {
+        Command::Switches(s) => assert_eq!(s.names_audience, NamesAudience::VerifiedOnly),
+        other => panic!("{other:?}"),
+    }
+    // Cancel keeps the choice and closes the dialog.
+    rig.click(&row(NamesAudience::VerifiedOnly));
+    rig.click("Cancel");
+    assert_eq!(rig.ui.switches.names_audience, NamesAudience::VerifiedOnly);
+    assert!(!rig.has(&selected(NamesAudience::VerifiedOnly)), "the dialog closed");
+    // Nobody is offered too.
+    rig.click(&row(NamesAudience::VerifiedOnly));
+    rig.click(audience_text(NamesAudience::Nobody));
+    assert_eq!(rig.ui.switches.names_audience, NamesAudience::Nobody);
+}
+
+/// WP6NF finding 7: Settings says when a choice could not be saved, until a
+/// save works again.
+#[test]
+fn settings_say_when_a_choice_could_not_be_saved() {
+    let mut rig = Rig::full();
+    rig.ui.switches.onboarded = true;
+    rig.ui.page = Page::Settings;
+    rig.size = egui::vec2(1000.0, 3600.0);
+    assert!(!rig.contains(super::settings::SETTINGS_NOT_SAVED));
+    rig.send(Update::SettingsSaved(false));
+    rig.ui.pump();
+    assert!(rig.contains(super::settings::SETTINGS_NOT_SAVED));
+    rig.send(Update::SettingsSaved(true));
+    rig.ui.pump();
+    assert!(!rig.contains(super::settings::SETTINGS_NOT_SAVED));
+}
+
+/// Design decision 2026-11-06: an unreadable block list is said on Privacy too, with
+/// Reset; it blocks nobody until it is read again or reset (CF-CALL-24).
+#[test]
+fn privacy_says_when_the_block_list_cannot_be_read_and_offers_reset() {
+    let mut rig = Rig::full();
+    rig.ui.switches.onboarded = true;
+    rig.ui.page = Page::Settings;
+    rig.ui.settings_page = SettingsPage::Privacy;
+    rig.size = egui::vec2(1000.0, 3600.0);
+    assert!(!rig.contains(super::blocked::UNREADABLE));
+    rig.send(Update::Blocked(BlockedView { people: vec![], unreadable: true }));
+    rig.ui.pump();
+    assert!(rig.contains(super::blocked::UNREADABLE), "said on Privacy");
+    rig.click(super::blocked::RESET_ACTION);
+    assert!(rig.ui.reset_blocks_confirm, "it asks first");
+    rig.click("Reset");
+    assert_eq!(rig.log().last(), Some(&Command::ResetBlocked));
+}
+
+/// SEC-11: Settings > Privacy says where this PC's identity key is kept once
+/// the backend says so, and says nothing about it otherwise.
+#[test]
+fn privacy_says_where_the_identity_key_is_kept() {
+    use super::backend::IdentityKey as KeyProvider;
+    let mut rig = Rig::full();
+    rig.ui.page = Page::Settings;
+    rig.click("Privacy");
+    assert!(!rig.contains(super::settings::IDENTITY_KEY_CHIP) && !rig.contains(super::settings::IDENTITY_KEY_WINDOWS));
+    rig.send(Update::IdentityKey(Some(KeyProvider::Chip)));
+    assert!(rig.contains(super::settings::IDENTITY_KEY_CHIP) && !rig.contains(super::settings::IDENTITY_KEY_WINDOWS));
+    rig.send(Update::IdentityKey(Some(KeyProvider::Windows)));
+    assert!(rig.contains(super::settings::IDENTITY_KEY_WINDOWS) && !rig.contains(super::settings::IDENTITY_KEY_CHIP));
+    // A chip identity the chip can't open: said, with the way out.
+    rig.send(Update::IdentityKey(Some(KeyProvider::ChipUnavailable)));
+    assert!(rig.contains(super::settings::IDENTITY_KEY_UNAVAILABLE) && !rig.contains(super::settings::IDENTITY_KEY_CHIP));
+    rig.send(Update::IdentityKey(None));
+    assert!(!rig.contains(super::settings::IDENTITY_KEY_CHIP) && !rig.contains(super::settings::IDENTITY_KEY_WINDOWS)
+        && !rig.contains(super::settings::IDENTITY_KEY_UNAVAILABLE));
 }

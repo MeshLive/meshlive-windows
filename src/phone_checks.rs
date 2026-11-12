@@ -126,7 +126,7 @@ fn opt_in_native_stream_phone_check() {
         eprintln!("PHONE_CHECK offer {offer}");
         assert_eq!(selected.announcement.sequence & 0x80, 0, "Approved source is advertising full: {offer}");
         CHECK_STARTED.set(Instant::now()).unwrap();
-        (Some(crate::stream_backend::Task::watch(dir.clone(), selected, out)), None)
+        (Some(crate::stream_backend::Task::watch(dir.clone(), selected, out, Default::default(), 1)), None)
     } else {
         // Mirrors the source UI's per-session public-address consent. This
         // opt-in is never accepted as a product or persistent consent.

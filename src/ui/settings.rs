@@ -1,310 +1,509 @@
-//! Settings: plain rows on black grouped under short section labels. Each
-//! switch says what it does in its name; the longer explanation sits behind
-//! its (i) button. A switch that cannot work says why under it.
+//! Settings as Android: a top page of rows and pushed pages (Privacy,
+//! Connection, Experiments, Help and feedback, About this app) whose title
+//! row has a Back arrow (`Ui::show`). Each switch says what it does in its
+//! name; the longer explanation sits behind its (i) button. A switch that
+//! cannot work says why under it.
 use super::*;
 use backend::Command;
 
+/// Experiments page (Android `advanced_experiments_hint`; this PC has no
+/// Manual video gate, and these choices are kept for this run only).
+pub(super) const EXPERIMENTS_HINT: &str = "Tests that may not work well yet. They turn off when MeshLive closes.";
+/// Reset private ID, asked first (Android `rotating_ids_reset_confirm`).
+pub(super) const RESET_ID_CONFIRM: &str = "Reset nearby recognition? Your contacts' phones recognise this PC nearby again after your next call with each of them. Your contacts and their verification stay the same.";
+pub(super) const RESET_ID_DONE: &str = "Private ID reset.";
+pub(super) const RESET_ID_FAILED: &str = "The private ID couldn't be reset. Try again.";
+/// Manual video settings on (Android `advancedSettingsDescriptionText`).
+pub(super) const MANUAL_ON: &str = "On: Go live uses exactly what you choose below; nothing adapts automatically. Your choice lasts until MeshLive closes.";
+/// Android `feat_viewer_frame_age_description` ("phone" read as "PC").
+const FRAME_AGE_INFO: &str = "While you watch a stream, dim a frozen picture and say so when it stops updating or the connection to the sender is lost, instead of leaving it on screen as if it were live. A small label shows how long ago the picture last updated. That time is counted on this PC from the last picture it received; it is not the delay from the camera.";
+/// CF-PRIV-23 (`notify::toast_text`): no switch on Windows (design decision).
+pub(super) const LOCK_SCREEN_NOTE: &str = "While this PC is locked or you are presenting, a call notification shows no name.";
+/// SEC-11: where this PC's identity key is kept (Settings > Privacy).
+pub(super) const IDENTITY_KEY_CHIP: &str = "Identity key: protected by this PC's security chip";
+pub(super) const IDENTITY_KEY_WINDOWS: &str = "Identity key: stored by Windows";
+pub(super) const IDENTITY_KEY_UNAVAILABLE: &str = "Identity key: this PC's security chip can't open it now. Calls can't start until it can. Delete everything starts a new ID.";
+const ABOUT_NOTE: &str = "Free software under the GNU GPL, version 3 or later. This Windows build is a preview.";
+/// Android `names_audience_title` and its choices (`names_audience_everyone`,
+/// `names_audience_verified`, `names_audience_nobody`).
+pub(super) const NAMES_AUDIENCE_TITLE: &str = "Who sees my name";
+/// WP6NF: a choice that could not be saved.
+pub(super) const SETTINGS_NOT_SAVED: &str = "Your settings couldn't be saved. They apply until MeshLive closes.";
+pub(super) fn audience_text(audience: meshlive::label_policy::NamesAudience) -> &'static str {
+    use meshlive::label_policy::NamesAudience;
+    match audience {
+        NamesAudience::Everyone => "People I call or who call me",
+        NamesAudience::VerifiedOnly => "Only my contacts",
+        NamesAudience::Nobody => "Nobody",
+    }
+}
+
 impl Ui {
     pub(super) fn settings(&mut self, ui: &mut egui::Ui, renderer: &str) {
-        // Experimental (off): a category list on the left of a wide window.
-        if self.split_panes && ui.available_width() >= theme::WIDE_SPLIT {
-            components::split(ui, 260.0, |left, right| {
-                for section in SettingsSection::ALL {
-                    let selected = self.settings_section == section;
-                    if components::nav_item(left, section.label(), section.icon(), selected, false).clicked() {
-                        self.settings_section = section;
-                    }
-                }
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if self.settings_split(ui) {
+            // Experimental (off): the top page on the left of a wide window,
+            // the chosen page on the right.
+            components::split(ui, 360.0, |left, right| {
+                left.spacing_mut().item_spacing.y = 0.0;
+                right.spacing_mut().item_spacing.y = 0.0;
+                self.settings_main(left);
                 right.set_max_width(right.available_width().min(960.0));
-                self.settings_body(right, renderer, Some(self.settings_section));
+                let page = if self.settings_page == SettingsPage::Main { SettingsPage::Privacy } else { self.settings_page };
+                components::settings_label(right, page.title());
+                self.settings_page_body(right, page, renderer);
             });
+        } else if self.settings_page == SettingsPage::Main {
+            self.settings_main(ui);
         } else {
-            self.settings_body(ui, renderer, None);
+            self.settings_page_body(ui, self.settings_page, renderer);
         }
     }
-    fn settings_body(&mut self, ui: &mut egui::Ui, renderer: &str, only: Option<SettingsSection>) {
-        let show = |section: SettingsSection| only.is_none_or(|o| o == section);
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let mut changed = false;
+    /// The experimental split layout is in use (wide window, switch on).
+    pub(super) fn settings_split(&self, ui: &egui::Ui) -> bool {
+        self.split_panes && ui.available_width() >= theme::WIDE_SPLIT
+    }
+    /// A dialog over the page owns Escape.
+    pub(super) fn settings_dialog_open(&self) -> bool {
+        self.dialog.is_some() || self.wipe_confirm.is_some() || self.name_edit.is_some() || self.reset_id_confirm
+            || self.block_confirm.is_some() || self.unblock_confirm.is_some() || self.reset_blocks_confirm
+            || self.report_done || self.mail_fallback || self.audience_sheet
+    }
 
-        if show(SettingsSection::Profile) {
-        components::settings_label(ui, "Profile");
+    /// "Who sees my name" (Android `refreshIdentityAudience`'s single-choice
+    /// dialog): the three choices, the current one marked; a pick saves it,
+    /// Cancel, Escape or a click outside change nothing.
+    pub(super) fn names_audience_sheet(&mut self, ctx: &egui::Context) {
+        if !self.audience_sheet {
+            return;
+        }
+        if self.own_name.is_none() {
+            self.audience_sheet = false;
+            return;
+        }
+        let current = self.switches.names_audience;
+        let mut picked = None;
+        let mut cancel = false;
+        let response = components::dialog(ctx, "names-audience", |ui| {
+            components::dialog_title(ui, NAMES_AUDIENCE_TITLE);
+            for audience in meshlive::label_policy::NamesAudience::ALL {
+                let text = audience_text(audience);
+                let mut row = ListRow::new(text);
+                if audience == current {
+                    row = row.trailing(Trailing::Value("Selected".into())).a11y(format!("{text}, Selected"));
+                }
+                if row.show(ui).clicked() {
+                    picked = Some(audience);
+                }
+            }
+            (cancel, _) = components::dialog_buttons(ui, "Cancel", Kind::Quiet, true, None);
+        });
+        if let Some(audience) = picked {
+            self.audience_sheet = false;
+            if audience != current {
+                self.switches.names_audience = audience;
+                self.switches_changed();
+            }
+        } else if cancel || response.should_close() {
+            self.audience_sheet = false;
+        }
+    }
+
+    /// The top page (Android `settingsPageMain`).
+    fn settings_main(&mut self, ui: &mut egui::Ui) {
+        let mut changed = false;
+        // WP6NF finding 7: a choice that could not be saved says so.
+        if self.settings_unsaved {
+            note(ui, SETTINGS_NOT_SAVED);
+            ui.add_space(8.0);
+        }
         components::settings_card(ui, |ui| {
-        let shown = self.own_name.clone().unwrap_or_else(|| crate::ui::NAME_NOT_SET.into());
-        if ListRow::new("Your name")
-            .icon(Icon::Person)
-            .trailing(Trailing::ValueChevron(shown.clone()))
-            .a11y(format!("Your name, {shown}"))
-            .show(ui)
-            .clicked()
-        {
-            self.name_error = None;
-            self.name_edit = Some(self.own_name.clone().unwrap_or_default());
-        }
-        let id = self.own_id.clone().unwrap_or_else(|| "Not available".into());
-        if ListRow::new("Your ID")
-            .icon(Icon::Shield)
-            .trailing(Trailing::ValueChevron(id.clone()))
-            .a11y(format!("Your ID, {id}"))
-            .show(ui)
-            .clicked()
-        {
-            // As Android: your ID opens your code, for adding a contact.
-            self.open_meet();
-        }
+            // As Android: Your code opens Add contact with this PC's code.
+            if ListRow::new("Your code").icon(Icon::Qr).chevron().show(ui).clicked() {
+                // Android: Settings > Your code opens on "Show my code".
+                self.open_meet_on(true);
+            }
+            let shown = self.own_name.clone().unwrap_or_else(|| crate::ui::NAME_NOT_SET.into());
+            if ListRow::new("Your name")
+                .icon(Icon::Person)
+                .trailing(Trailing::ValueChevron(shown.clone()))
+                .a11y(format!("Your name, {shown}"))
+                .show(ui)
+                .clicked()
+            {
+                self.name_error = None;
+                self.name_edit = Some(self.own_name.clone().unwrap_or_default());
+            }
+            // WP4: Android's "Who sees my name", only while a name is set.
+            if self.own_name.is_some() {
+                let value = audience_text(self.switches.names_audience);
+                if ListRow::new(NAMES_AUDIENCE_TITLE)
+                    .icon(Icon::People)
+                    .trailing(Trailing::ValueChevron(value.to_owned()))
+                    .a11y(format!("{NAMES_AUDIENCE_TITLE}, {value}"))
+                    .show(ui)
+                    .clicked()
+                {
+                    self.audience_sheet = true;
+                }
+            }
         });
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
-            ui.add(egui::Label::new(theme::caption(crate::ui::NAME_AUDIENCE)).wrap());
+        note(ui, crate::ui::NAME_AUDIENCE);
+        ui.add_space(theme::SECTION_GAP);
+
+        components::settings_card(ui, |ui| {
+            let receive_gate = self.unavailable_reason(Feature::ReceiveCalls);
+            let mut receive = self.switches.receive_calls && receive_gate.is_none();
+            let awake = if receive { Some(crate::ui::AWAKE_NOTE) } else { None };
+            let mut row = ToggleRow::new("Allow calls").info("Let phones nearby call this PC. Phones can't reach it while it sleeps.");
+            if let Some(note) = awake {
+                row = row.subtitle(note);
+            }
+            if row.enabled(receive_gate.is_none()).show(ui, &mut receive).changed() {
+                self.switches.receive_calls = receive;
+                changed = true;
+            }
+            if let Some(reason) = receive_gate {
+                gate_reason(ui, reason);
+            }
+            if ToggleRow::new("Start with Windows")
+                .info("MeshLive starts in the notification area when you sign in, so phones can call this PC. Windows can also turn this off in Task Manager.")
+                .show(ui, &mut self.switches.start_with_windows)
+                .changed()
+            {
+                changed = true;
+            }
         });
         ui.add_space(theme::SECTION_GAP);
-        }
 
-        if show(SettingsSection::Calls) {
-        components::settings_label(ui, "Calls");
         components::settings_card(ui, |ui| {
-        let receive_gate = self.unavailable_reason(Feature::ReceiveCalls);
-        let mut receive = self.switches.receive_calls && receive_gate.is_none();
-        let awake = if receive { Some(crate::ui::AWAKE_NOTE) } else { None };
-        let mut row = ToggleRow::new("Allow calls").info("Let phones nearby call this PC. Phones can't reach it while it sleeps.");
-        if let Some(note) = awake {
-            row = row.subtitle(note);
-        }
-        if row
-            .enabled(receive_gate.is_none())
-            .show(ui, &mut receive)
-            .changed()
-        {
-            self.switches.receive_calls = receive;
-            changed = true;
-        }
-        if let Some(reason) = receive_gate {
-            gate_reason(ui, reason);
-        }
-        if ToggleRow::new("Start with Windows")
-            .info("MeshLive starts in the notification area when you sign in, so phones can call this PC. Windows can also turn this off in Task Manager.")
-            .show(ui, &mut self.switches.start_with_windows)
-            .changed()
-        {
-            changed = true;
-        }
-        let streams = self.backend.streams();
-        let s = &mut self.switches;
-        for (value, title, info) in [
-            (&mut s.voice_calls, "Voice calls", "Call someone without video, and add video during the call."),
-            (
-                &mut s.block_unknown,
-                "Block unknown callers",
-                "Calls from anyone who isn't a verified contact are declined without ringing. To them it looks like you didn't answer.",
-            ),
-            (
-                &mut s.ringback,
-                "Play ringing tone",
-                "A quiet ringing tone while the other phone rings, and when someone calls this PC (not during Do not disturb or while presenting). Your volume is never changed.",
-            ),
-            (&mut s.relay, "Relay video for others", "Pass live video on to phones near you."),
-        ] {
-            if title == "Relay video for others" && !streams {
-                continue;
+            // Android `settingsRowVideo` above Privacy: Standard, or Manual while
+            // Manual video settings is on.
+            let value = if self.manual_video { "Manual" } else { "Standard" };
+            if ListRow::new("Video quality")
+                .icon(SettingsPage::Video.icon())
+                .trailing(Trailing::ValueChevron(value.into()))
+                .a11y(format!("Video quality, {value}"))
+                .show(ui)
+                .clicked()
+            {
+                self.settings_page = SettingsPage::Video;
             }
-            changed |= ToggleRow::new(title).info(info).show(ui, value).changed();
-        }
+            self.page_row(ui, SettingsPage::Privacy);
         });
         ui.add_space(theme::SECTION_GAP);
-        }
 
-        if show(SettingsSection::Privacy) {
-        components::settings_label(ui, "Privacy");
+        components::settings_label(ui, "Advanced");
         components::settings_card(ui, |ui| {
-        let visible_gate = self.unavailable_reason(Feature::VisibleToContacts);
-        let mut visible = self.switches.visible_to_contacts && visible_gate.is_none();
-        if WIRED_VISIBLE_TO_CONTACTS && ToggleRow::new("Visible to contacts")
-            .info("Contacts nearby can see that you are ready for calls.")
-            .enabled(visible_gate.is_none())
-            .show(ui, &mut visible)
-            .changed()
-        {
-            self.switches.visible_to_contacts = visible;
-            changed = true;
-        }
-        if let (true, Some(reason)) = (WIRED_VISIBLE_TO_CONTACTS, visible_gate) {
-            gate_reason(ui, reason);
-        }
-        let streams_privacy = self.backend.streams();
-        let Switches { generated_names, title_pages, names_before_answer, bvmid2, bvmid1_compat, visible_by_name, .. } =
-            &mut self.switches;
-        for (value, title, info) in [
-            (
-                generated_names,
-                "Friendly names for nearby phones",
-                "Shows phones you haven't verified under a made-up two-word name such as Blue Otter, made from the temporary ID they are using. It doesn't prove who they are. Off: the plain ID is shown.",
-            ),
-            (
-                title_pages,
-                "Show my stream title to everyone nearby",
-                "When you go live with a title, anyone nearby can read it in their list before they join. A title is public. Off: viewers see the title only after they join.",
-            ),
-            (
-                names_before_answer,
-                "Show my name before they answer",
-                "Your name goes to whoever you call, before the app has checked who they are. Only the name goes early, never the call subject. Turn this off to send it only after they answer and are checked.",
-            ),
-            (
-                bvmid2,
-                "Codes that expire when you add a contact",
-                "Add contact shows a code that works once, for five minutes, and checks that the other phone really holds its key before you confirm. Both of you scan each other. Off: the earlier code that never expires.",
-            ),
-            (
-                bvmid1_compat,
-                "Accept older verification codes",
-                "Lets a code from an older MeshLive version give the full check mark. Those codes never expire, so by default they only count as checked by code.",
-            ),
-            (
-                visible_by_name,
-                "Visible by name",
-                "Adds a button to show a name you choose to everyone nearby for ten minutes, for a meeting or a camp. Off: no name is ever shown over Bluetooth.",
-            ),
-        ] {
-            if title == "Show my stream title to everyone nearby" && !streams_privacy {
-                continue;
+            for page in [SettingsPage::Connection, SettingsPage::Manual, SettingsPage::Experiments, SettingsPage::Help] {
+                self.page_row(ui, page);
             }
-            if HIDDEN_UNTIL_WIRED.contains(&title) {
-                continue;
-            }
-            changed |= ToggleRow::new(title).info(info).show(ui, value).changed();
-        }
         });
         ui.add_space(theme::SECTION_GAP);
-        }
 
-        if show(SettingsSection::Bluetooth) {
-        components::settings_label(ui, "Bluetooth");
+        components::settings_label(ui, "About and updates");
         components::settings_card(ui, |ui| {
-        let status = self.bluetooth.map_or(CHECKING_BLUETOOTH, |caps| caps.status());
-        let details_id = ui.id().with("bluetooth-details");
-        let mut open = ui.data(|d| d.get_temp::<bool>(details_id).unwrap_or(false));
-        let (row, _) = ListRow::new("Bluetooth")
-            .icon(Icon::Bluetooth)
-            .trailing(Trailing::Value(status.into()))
-            .a11y(format!("Bluetooth, {status}. {} details", if open { "Hide" } else { "Show" }))
-            .show_with(ui, |ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(theme::ICON_SMALL, theme::ICON_SMALL), egui::Sense::hover());
-                draw_icon(ui.painter(), rect, if open { Icon::ChevronDown } else { Icon::Chevron }, theme::TEXT_SECONDARY);
-            });
-        if row.clicked() {
-            open = !open;
-            ui.data_mut(|d| d.insert_temp(details_id, open));
+            self.page_row(ui, SettingsPage::About);
+            // Android `contactUsRow`: an email draft to MeshLive (no identifiers).
+            if ListRow::new(super::report::CONTACT_US)
+                .subtitle(super::report::CONTACT_US_SUBTITLE)
+                .icon(Icon::People)
+                .chevron()
+                .show(ui)
+                .clicked()
+            {
+                self.open_mail_draft(meshlive::reporting::Draft::Contact);
+            }
+        });
+        ui.add_space(theme::SECTION_GAP);
+
+        if Pill::new("Delete everything").kind(Kind::Destructive).icon(Icon::Warning).fill_width().show(ui).clicked() {
+            self.wipe_confirm = Some(String::new());
         }
-        if open {
-            ui.indent("bluetooth-details", |ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
-                ui.add_space(4.0);
-                if let Some(caps) = self.bluetooth {
-                    ui.label(theme::secondary(format!(
-                        "Find phones: {} \u{b7} Be found by phones: {}",
-                        support(caps.central),
-                        support(caps.peripheral)
-                    )));
-                    for feature in Feature::ALL {
-                        let text = match self.availability(feature) {
-                            Some(Availability::Available) => "Available".to_owned(),
-                            Some(Availability::NeedsAdvertisingCheck) => "Checked when you turn it on".to_owned(),
-                            Some(Availability::Unavailable(reason)) => format!("Unavailable. {reason}"),
-                            None => "Unknown".to_owned(),
-                        };
-                        ui.label(theme::secondary(format!("{}: {text}", feature.label())));
+        ui.add_space(theme::SECTION_GAP);
+        if changed {
+            self.switches_changed();
+        }
+    }
+    /// A row that opens a pushed page.
+    fn page_row(&mut self, ui: &mut egui::Ui, page: SettingsPage) {
+        if ListRow::new(page.title()).icon(page.icon()).chevron().show(ui).clicked() {
+            self.settings_page = page;
+        }
+    }
+    fn settings_page_body(&mut self, ui: &mut egui::Ui, page: SettingsPage, renderer: &str) {
+        match page {
+            SettingsPage::Main => self.settings_main(ui),
+            SettingsPage::Video => self.settings_video(ui),
+            SettingsPage::Privacy => self.settings_privacy(ui),
+            SettingsPage::Connection => self.settings_connection(ui),
+            SettingsPage::Manual => self.settings_manual(ui),
+            SettingsPage::Experiments => self.settings_experiments(ui, renderer),
+            SettingsPage::Help => self.settings_help(ui),
+            SettingsPage::About => self.settings_about(ui),
+            SettingsPage::Blocked => self.settings_blocked(ui),
+        }
+    }
+
+    /// Video and calls (Android `settingsPageVideo`). This PC reads no
+    /// temperature, so Android's "Show temperature" and "Lower quality when
+    /// hot" are not here.
+    fn settings_video(&mut self, ui: &mut egui::Ui) {
+        let mut changed = false;
+        components::settings_card(ui, |ui| {
+            if ToggleRow::new("Fill screen with video")
+                .info("The other person's picture fills the video area in calls and while you watch; the sides that run past are cut. Off: the whole picture with black bars.")
+                .show(ui, &mut self.switches.video_fill)
+                .changed()
+            {
+                changed = true;
+            }
+            // Android `ViewerFeatures.frameAge` (Experimental, off).
+            if ToggleRow::new("Warn when video freezes")
+                .info(FRAME_AGE_INFO)
+                .show(ui, &mut self.switches.frame_age)
+                .changed()
+            {
+                changed = true;
+            }
+        });
+        ui.add_space(theme::SECTION_GAP);
+        if changed {
+            self.switches_changed();
+        }
+    }
+
+    /// Manual video (Android `settingsPageManual`): off (Standard), Go live
+    /// sends the default video; on, exactly the encoder and quality chosen
+    /// here. The radio quality stays on Go live (Android's audio-only screen).
+    fn settings_manual(&mut self, ui: &mut egui::Ui) {
+        components::settings_card(ui, |ui| {
+            let _ = ToggleRow::new("Manual video settings").show(ui, &mut self.manual_video);
+        });
+        ui.add_space(8.0);
+        note(ui, &manual_note(self.manual_video));
+        if self.manual_video {
+            let s = &mut self.live_settings;
+            ui.add_space(theme::SECTION_GAP);
+            components::settings_label(ui, "Encoder");
+            let codecs = meshlive::video::codecs::Switches::current();
+            // Two fixed rows: four chips in one row ran past a 640 px window.
+            for row in [[2, 3], [5, 4]] {
+                if !row.iter().any(|codec| codecs.codec_on(*codec)) {
+                    continue;
+                }
+                ui.horizontal_wrapped(|ui| {
+                    for codec in row {
+                        if codecs.codec_on(codec) && chip(ui, codec_name(codec), s.codec == codec, true).clicked() {
+                            s.codec = codec;
+                        }
+                    }
+                });
+            }
+            ui.add_space(theme::SECTION_GAP);
+            components::settings_label(ui, "Quality");
+            ui.label(theme::secondary("Resolution"));
+            ui.horizontal_wrapped(|ui| {
+                for (w, h) in [(426, 240), (640, 360), (854, 480)] {
+                    if chip(ui, &format!("{w} \u{d7} {h}"), (s.width, s.height) == (w, h), true).clicked() {
+                        s.width = w;
+                        s.height = h;
                     }
                 }
-                ui.label(theme::secondary("MeshLive never turns Bluetooth on or off."));
-                ui.add_space(8.0);
+            });
+            ui.add_space(8.0);
+            ui.label(theme::secondary("Frame rate"));
+            ui.horizontal_wrapped(|ui| {
+                for fps in [15, 24, 30] {
+                    if chip(ui, &format!("{fps} fps"), s.fps == fps, true).clicked() {
+                        s.fps = fps;
+                    }
+                }
+            });
+            ui.add_space(12.0);
+            components::value_slider(ui, "Video bitrate", &mut s.kbps, 100..=1500, 25, "kbps");
+        }
+        ui.add_space(theme::SECTION_GAP);
+    }
+
+    /// Privacy (the Android rows this PC has, in Android's order).
+    fn settings_privacy(&mut self, ui: &mut egui::Ui) {
+        let mut changed = false;
+        components::settings_card(ui, |ui| {
+            if ToggleRow::new("Block unknown callers")
+                .info("Calls from anyone who isn't a verified contact are declined without ringing. To them it looks like you didn't answer.")
+                .show(ui, &mut self.switches.block_unknown)
+                .changed()
+            {
+                changed = true;
+            }
+            // Android: Blocked people follows Block unknown callers.
+            if ListRow::new("Blocked people").icon(Icon::Person).chevron().show(ui).clicked() {
+                self.settings_page = SettingsPage::Blocked;
+            }
+            if ListRow::new("Reset private ID").icon(Icon::Shield).show(ui).clicked() {
+                self.reset_id_confirm = true;
+            }
+        });
+        // Design decision 2026-11-06: an unreadable block list is said where you look,
+        // with Reset (it blocks nobody until it is read again or reset).
+        if self.blocked_people.unreadable {
+            ui.add_space(8.0);
+            if components::notice(ui, super::blocked::UNREADABLE, Some(super::blocked::RESET_ACTION)) {
+                self.reset_blocks_confirm = true;
+            }
+        }
+        if let Some(done) = self.private_id_reset {
+            ui.add_space(8.0);
+            note(ui, if done { RESET_ID_DONE } else { RESET_ID_FAILED });
+        }
+        ui.add_space(8.0);
+        note(ui, LOCK_SCREEN_NOTE);
+        if let Some(key) = self.identity_key {
+            ui.add_space(8.0);
+            note(ui, match key {
+                backend::IdentityKey::Chip => IDENTITY_KEY_CHIP,
+                backend::IdentityKey::Windows => IDENTITY_KEY_WINDOWS,
+                backend::IdentityKey::ChipUnavailable => IDENTITY_KEY_UNAVAILABLE,
             });
         }
+        ui.add_space(theme::SECTION_GAP);
+        if changed {
+            self.switches_changed();
+        }
+    }
+
+    /// Connection (Android's Advanced > Connection): this PC's Bluetooth and
+    /// what it can do. The Wi-Fi Direct row joins this page later (W4).
+    fn settings_connection(&mut self, ui: &mut egui::Ui) {
+        let status = self.bluetooth.map_or(CHECKING_BLUETOOTH, |caps| caps.status());
+        components::settings_card(ui, |ui| {
+            let _ = ListRow::new("Bluetooth")
+                .icon(Icon::Bluetooth)
+                .trailing(Trailing::Value(status.into()))
+                .clickable(false)
+                .a11y(format!("Bluetooth, {status}"))
+                .show(ui);
+        });
+        ui.add_space(8.0);
+        ui.indent("bluetooth-details", |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            if let Some(caps) = self.bluetooth {
+                ui.label(theme::secondary(format!(
+                    "Find phones: {} \u{b7} Be found by phones: {}",
+                    support(caps.central),
+                    support(caps.peripheral)
+                )));
+                for feature in Feature::ALL {
+                    let text = match self.availability(feature) {
+                        Some(Availability::Available) => "Available".to_owned(),
+                        Some(Availability::NeedsAdvertisingCheck) => "Checked when you turn it on".to_owned(),
+                        Some(Availability::Unavailable(reason)) => format!("Unavailable. {reason}"),
+                        None => "Unknown".to_owned(),
+                    };
+                    ui.label(theme::secondary(format!("{}: {text}", feature.label())));
+                }
+            }
+            ui.label(theme::secondary("MeshLive never turns Bluetooth on or off."));
         });
         ui.add_space(theme::SECTION_GAP);
-        }
+    }
 
-        if show(SettingsSection::About) {
-        components::settings_label(ui, "About");
+    /// Experiments (Android `settingsPageExperiments`): user-facing tests,
+    /// kept for this run only. Developer arms stay environment variables.
+    fn settings_experiments(&mut self, ui: &mut egui::Ui, renderer: &str) {
+        note(ui, EXPERIMENTS_HINT);
+        ui.add_space(8.0);
         components::settings_card(ui, |ui| {
-        let version = concat!("Version ", env!("CARGO_PKG_VERSION"));
-        if ListRow::new("About MeshLive")
-            .icon(Icon::Info)
-            .trailing(Trailing::ValueChevron(version.into()))
-            .a11y(concat!("About MeshLive, Version ", env!("CARGO_PKG_VERSION"), " \u{b7} Windows preview"))
-            .show(ui)
-            .clicked()
-        {
-            self.dialog = Some((
-                "About MeshLive".into(),
-                concat!(
-                    "MeshLive ",
-                    env!("CARGO_PKG_VERSION"),
-                    "\nFree software: GPL-3.0-or-later.\n\nThis Windows build is a preview."
-                )
-                .into(),
-            ));
-        }
-        if ListRow::new("Export diagnostics")
-            .icon(Icon::Search)
-            .chevron()
-            .a11y("Export diagnostics, A text report for a problem report")
-            .show(ui)
-            .clicked()
-        {
-            self.backend.command(Command::ExportDiagnostics);
-        }
-        let preview_id = ui.id().with("preview-diagnostics");
-        let mut preview = ui.data(|d| d.get_temp::<bool>(preview_id).unwrap_or(false));
-        let (row, _) = ListRow::new("Preview and diagnostics")
-            .icon(Icon::Settings)
-            .a11y("Preview and diagnostics")
-            .show_with(ui, |ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(theme::ICON_SMALL, theme::ICON_SMALL), egui::Sense::hover());
-                draw_icon(ui.painter(), rect, if preview { Icon::ChevronDown } else { Icon::Chevron }, theme::TEXT_SECONDARY);
-            });
-        if row.clicked() {
-            preview = !preview;
-            ui.data_mut(|d| d.insert_temp(preview_id, preview));
-        }
-        if preview {
             let mut demo = self.demo;
             if ToggleRow::new("Show sample people and streams (Experimental)").show(ui, &mut demo).changed() {
                 self.set_demo(demo);
             }
             ToggleRow::new("Show GPU texture test").show(ui, &mut self.texture_visible);
-            ui.add_space(4.0);
+            ToggleRow::new("Split panes on wide windows (Experimental)").show(ui, &mut self.split_panes);
+        });
+        ui.add_space(8.0);
+        ui.indent("experiments-facts", |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(theme::secondary(renderer));
-            ui.label(theme::secondary("Ctrl+plus/minus to change text size. Preview choices are never saved."));
-        }
+            ui.label(theme::secondary("Ctrl+plus/minus to change text size."));
         });
         ui.add_space(theme::SECTION_GAP);
-        if Pill::new("Delete everything").kind(Kind::Destructive).icon(Icon::Warning).fill_width().show(ui).clicked() {
-            self.wipe_confirm = Some(String::new());
-        }
+    }
+
+    /// Help and feedback: Export diagnostics and Report a bug (Android
+    /// `reportBugButton`; here the same email draft as Contact us).
+    fn settings_help(&mut self, ui: &mut egui::Ui) {
+        components::settings_card(ui, |ui| {
+            if ListRow::new("Export diagnostics")
+                .icon(Icon::Search)
+                .chevron()
+                .a11y("Export diagnostics, A text report for a problem report")
+                .show(ui)
+                .clicked()
+            {
+                self.backend.command(Command::ExportDiagnostics);
+            }
+            if ListRow::new(super::report::REPORT_BUG).icon(Icon::Warning).chevron().show(ui).clicked() {
+                self.open_mail_draft(meshlive::reporting::Draft::Contact);
+            }
+        });
         ui.add_space(theme::SECTION_GAP);
-        }
-        if changed {
-            self.switches_changed();
-        }
+    }
+
+    /// About this app (Android `activity_about`): the version and how this
+    /// copy was installed.
+    fn settings_about(&mut self, ui: &mut egui::Ui) {
+        let installed = if crate::packaged() { "MSIX package" } else { "Zip folder" };
+        components::settings_card(ui, |ui| {
+            for (title, value) in [("Version", env!("CARGO_PKG_VERSION")), ("Installed as", installed)] {
+                let _ = ListRow::new(title).trailing(Trailing::Value(value.into())).clickable(false).a11y(format!("{title}, {value}")).show(ui);
+            }
+        });
+        ui.add_space(8.0);
+        note(ui, ABOUT_NOTE);
+        ui.add_space(theme::SECTION_GAP);
     }
 }
 
-/// Hidden until wired (2026-10-21): no part of the PC reads these switches
-/// yet, so showing them would promise something that does not happen.
-/// Their saved values stay. See the switch register (docs/dev/switches.md).
-const HIDDEN_UNTIL_WIRED: [&str; 4] = [
-    "Show my name before they answer",
-    "Codes that expire when you add a contact",
-    "Accept older verification codes",
-    "Visible by name",
-];
-/// "Visible to contacts" (global) is hidden until nearby visibility is wired.
-const WIRED_VISIBLE_TO_CONTACTS: bool = false;
+/// The encoder's name as its chip shows it.
+pub(super) fn codec_name(codec: u8) -> &'static str {
+    match codec {
+        3 => "AV1 (hardware)",
+        4 => "H.264 (hardware)",
+        5 => "HEVC (hardware)",
+        _ => "VP9",
+    }
+}
+
+/// What Manual video settings means now: on, exactly the choices; off
+/// (Standard), the default video, said in full (this PC adapts nothing).
+fn manual_note(on: bool) -> String {
+    if on {
+        return MANUAL_ON.to_owned();
+    }
+    let auto = meshlive::stream_source::Settings::default();
+    format!(
+        "Off (recommended): Go live uses {} \u{d7} {}, {} fps, {} kbps and {}.",
+        auto.width,
+        auto.height,
+        auto.fps,
+        auto.kbps,
+        codec_name(auto.codec)
+    )
+}
 
 /// Why a switch cannot be used, under it (wraps; screen readers read it).
 fn gate_reason(ui: &mut egui::Ui, reason: &str) {
-
     ui.label(theme::secondary(reason));
     ui.add_space(10.0);
+}
+
+/// A quiet note under a card, aligned with the card's text.
+fn note(ui: &mut egui::Ui, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.add(egui::Label::new(theme::caption(text)).wrap());
+    });
 }

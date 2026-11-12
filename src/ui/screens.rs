@@ -16,12 +16,12 @@ const STORE_TEMPORARY: &str = "Verified contacts couldn't be loaded. Calls still
 pub(super) const BONDED_SHORT: &str = "This PC is paired with this phone, so the phone can tell it's this PC.";
 pub(super) const NOT_VERIFIED: &str = "Not verified";
 pub(super) const NOT_VERIFIED_HELP: &str = "Not verified. A new call from the same phone shows a new name.";
+// Android strings_ui.xml and strings.xml (Add contact).
+pub(super) const SEG_SCAN: &str = "Scan their code";
+pub(super) const SEG_SHOW: &str = "Show my code";
+pub(super) const SAVE_AS: &str = "Save contact as";
+pub(super) const SAVE_AS_MESSAGE: &str = "Pick a name that only you see. Leave it empty to keep their ID.";
 pub(super) const BONDED_NOTE: &str = "This PC is paired with this phone in Bluetooth settings, so the phone can tell it is this PC even in a private call. Remove the pairing in Windows Bluetooth settings to call privately.";
-
-/// A takeover screen's title row: Back and the title (Esc is the screen's).
-fn screen_title(ui: &mut egui::Ui, title: &str) -> bool {
-    components::top_bar(ui, title, Some("Back"), |_| {})
-}
 
 impl Ui {
     // ------------------------------------------------------------- Home
@@ -222,6 +222,9 @@ impl Ui {
 
     pub(super) fn watch_screen(&mut self, ui: &mut egui::Ui) {
         if let Some(note) = self.watch_note.as_ref() { components::notice(ui, note, None); }
+        // "Warn when video freezes" (Experimental; Android `ViewerFrameAgeController`).
+        let now = self.now();
+        let freeze = if self.switches.frame_age { self.watch.as_mut().map(|w| w.freeze(now)) } else { None };
         let Some(watch) = self.watch.as_ref() else {
             return;
         };
@@ -244,7 +247,10 @@ impl Ui {
             leave = true;
         }
         ui.add_space(8.0);
-        let bar = theme::ROUND_CONTROL + 40.0;
+        // "Block this person" (Android's listener) needs the source's
+        // authenticated key; it sits under the controls.
+        let source = self.watch_source.filter(|_| state != WatchState::Ended);
+        let bar = theme::ROUND_CONTROL + 40.0 + if source.is_some() { 112.0 } else { 0.0 };
         if radio {
             // Audio only: the radio mark, its state and where it comes from.
             ui.add_space(((ui.available_height() - bar - 240.0) * 0.3).max(12.0));
@@ -255,6 +261,10 @@ impl Ui {
                 ui.add_space(16.0);
                 ui.label(theme::headline(&status));
                 ui.label(theme::secondary(&route));
+                // Android `audioListenMeter`: what arrives, while it plays.
+                ui.add_space(8.0);
+                super::control_row::level_meter(ui, "Sound level", if playing { self.watch_level } else { 0.0 });
+                ui.add_space(8.0);
                 ui.label(theme::caption(&info));
                 ui.add_space(8.0);
                 ui.set_max_width(520.0);
@@ -265,8 +275,13 @@ impl Ui {
         } else {
             let height = (ui.available_height() - bar - 52.0).max(120.0);
             let texture = if state != WatchState::Playing || watch.source_state.camera_off { None } else { self.video };
+            // Never "Live" under a frozen picture (Android's two-word status).
+            let status = if matches!(freeze, Some(Freeze::Stalled(_))) { WATCH_STATUS_STALLED.to_owned() } else { status };
             // The same video area as a call: upright, never stretched to 16:9.
-            video_stage(ui, egui::vec2(ui.available_width(), height), "Live video", &status, texture.map(|id| (id, self.peer_size)));
+            let area = video_stage(ui, egui::vec2(ui.available_width(), height), "Live video", &status, texture.map(|id| (id, self.peer_size)), self.video_fill());
+            if let Some(freeze) = freeze {
+                freeze_overlay(ui, area, freeze);
+            }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label(theme::body(&status));
@@ -289,12 +304,40 @@ impl Ui {
                 leave |= components::round_button(ui, Icon::Stop, "Stop", Kind::Live).clicked();
             }
         });
+        let (mut block, mut report) = (false, false);
+        if source.is_some() {
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                // Android's listener: Report, then Block this person; quiet text buttons.
+                report = Pill::new(super::report::REPORT).kind(Kind::Quiet).show(ui).clicked();
+                block = Pill::new(super::blocked::BLOCK_THIS_PERSON).kind(Kind::Quiet).show(ui).clicked();
+            });
+        }
         if toggle_mute {
             if let Some(w) = self.watch.as_mut() {
                 w.toggle_mute();
                 let muted = w.muted;
                 self.backend.command(Command::MuteWatch(muted));
             }
+        }
+        if let Some(fingerprint) = source.filter(|_| report) {
+            // Android `audioListenReport`: report (block without asking),
+            // hide this stream, leave; then Tell MeshLive is offered.
+            self.report_person(fingerprint);
+            if let Some(route) = self.watch_route {
+                self.backend.command(Command::HideWatchedStream { source: fingerprint[..16].try_into().unwrap(), route });
+            }
+            self.leave_watch();
+            return;
+        }
+        if let Some(fingerprint) = source.filter(|_| block) {
+            // Android: block, hide this stream, leave; no question first.
+            self.send_block(fingerprint, true, super::blocked::BlockFrom::Stream);
+            if let Some(route) = self.watch_route {
+                self.backend.command(Command::HideWatchedStream { source: fingerprint[..16].try_into().unwrap(), route });
+            }
+            self.leave_watch();
+            return;
         }
         if leave {
             self.leave_watch();
@@ -353,7 +396,7 @@ impl Ui {
             if Pill::new("Video call").icon(Icon::Camera).min_width(180.0).enabled(enabled).a11y(format!("Video call {name}")).show(ui).clicked() {
                 result = Some(false);
             }
-            let voice_ok = enabled && self.switches.voice_calls;
+            let voice_ok = enabled;
             if Pill::new("Voice call").kind(Kind::Secondary).icon(Icon::Phone).min_width(180.0).enabled(voice_ok).a11y(format!("Voice call {name}")).show(ui).clicked() {
                 result = Some(true);
             }
@@ -390,7 +433,7 @@ impl Ui {
             } else if !self.backend.connected() {
                 ("No one found yet", "Searching isn't connected in this build.")
             } else {
-                ("No one found yet", crate::ui::FIND_PCS_HINT)
+                ("No one found yet", crate::ui::NOBODY_NEARBY_HINT)
             };
             empty(ui, Icon::Phone, title, text);
             ui.add_space(12.0);
@@ -406,16 +449,24 @@ impl Ui {
             });
             return;
         }
+        // Android `nearbyPeopleSearch` (`NearbyPeopleSession.showSearch`):
+        // with more than eight people, or while a search is typed, "Search
+        // people" keeps the rows whose name contains it (any case).
+        if people.len() > SEARCH_FROM || !self.people_query.is_empty() {
+            let _ = components::text_field(ui, &mut self.people_query, None, "Search people", Some(32));
+            ui.add_space(12.0);
+        }
+        let term = self.people_query.trim().to_lowercase();
         let can_call = self.usable(Feature::CallOut);
         for (heading, verified) in [("Contacts", true), ("Nearby", false)] {
-            let group: Vec<_> = people.iter().filter(|p| p.verified == verified).collect();
+            let group: Vec<_> = people.iter().filter(|p| p.verified == verified && p.name.to_lowercase().contains(&term)).collect();
             if group.is_empty() {
                 continue;
             }
             components::section_header(ui, heading);
             let count = group.len();
             for (index, person) in group.into_iter().enumerate() {
-                let (call, picked, _) = self.person_card(ui, person.id, &person.name, &person.subtitle(), can_call, verified, index + 1 == count, wide, None);
+                let (call, picked, _) = self.person_card(ui, person.id, &person.name, &self.person_details(person), can_call, verified, index + 1 == count, wide, None);
                 if picked {
                     self.selected_person = Some(person.id);
                 }
@@ -438,13 +489,15 @@ impl Ui {
     /// A person's row with the two calls; `more` (Some(open)) adds a quiet
     /// "More" toggle for a contact's other actions, returned as the third value.
     #[allow(clippy::too_many_arguments)]
-    fn person_card(&self, ui: &mut egui::Ui, _id: Handle, name: &str, details: &str, enabled: bool, saved: bool, last: bool, selectable: bool, more: Option<bool>) -> (Option<bool>, bool, bool) {
-        let voice_ok = enabled && self.switches.voice_calls;
+    fn person_card(&self, ui: &mut egui::Ui, id: Handle, name: &str, details: &str, enabled: bool, saved: bool, last: bool, selectable: bool, more: Option<bool>) -> (Option<bool>, bool, bool) {
+        let voice_ok = enabled;
         let mut toggled = false;
         let (row, call) = ListRow::new(name)
             .subtitle(details)
             .leading(Leading::Avatar(if saved { name.to_owned() } else { String::new() }))
-            .verified(saved)
+            // Android `DisplayIdentity`: the full mark only for a contact
+            // scanned in person; one checked by code says so in words.
+            .verified(saved && self.scanned_in_person(id))
             .clickable(selectable)
             .divider(!last)
             .show_with(ui, |ui| {
@@ -458,13 +511,33 @@ impl Ui {
                 if voice.clicked() {
                     result = Some(true);
                 }
-                if let Some(open) = more {
-                    let icon = if open { Icon::ChevronDown } else { Icon::Chevron };
-                    toggled = components::icon_button_sized(ui, icon, &format!("More for {name}"), Kind::Quiet, theme::ICON_BUTTON).clicked();
+                // Android's contact row: the info button opens the contact sheet.
+                if more.is_some() {
+                    toggled = components::icon_button_sized(ui, Icon::Info, &format!("More for {name}"), Kind::Quiet, theme::ICON_BUTTON).clicked();
                 }
                 result
             });
         (call, selectable && row.clicked(), toggled)
+    }
+    /// Settings > Video quality > Fill screen with video, unless
+    /// `MESHLIVE_VIDEO_FIT=1` keeps FIT for this run.
+    fn video_fill(&self) -> bool {
+        self.switches.video_fill && call_layout::fill_screen()
+    }
+    /// A saved contact verified by scanning their code in person (Android
+    /// `VerificationBasis.SCANNED`); false for one only checked by code and
+    /// for anyone who is not a contact.
+    pub(super) fn scanned_in_person(&self, id: Handle) -> bool {
+        self.contacts.iter().any(|c| c.id == id && c.by_qr)
+    }
+    /// A Calls > Nearby row's second line: a contact checked by code only
+    /// says so instead of "Verified contact".
+    fn person_details(&self, person: &Person) -> String {
+        if person.verified && !person.copied && !self.scanned_in_person(person.id) {
+            format!("{} \u{b7} {CHECKED_BY_CODE}", person.reach.label())
+        } else {
+            person.subtitle()
+        }
     }
     fn recent_calls(&mut self, ui: &mut egui::Ui) {
         if self.recent.is_empty() {
@@ -475,7 +548,15 @@ impl Ui {
         let can_call = self.usable(Feature::CallOut);
         let mut back = None;
         let mut block = None;
+        let now = self.now();
         for (index, call) in recent.iter().enumerate() {
+            if let Some(at) = call.declined_at {
+                // Android `blockedRecentRow`: "Blocked call", "Declined, <when>";
+                // no call back and no Block (nobody is named).
+                let when = format!("Declined, {}", ago(now.saturating_duration_since(at)));
+                let _ = ListRow::new(BLOCKED_CALL).subtitle(&when).icon(Icon::Warning).clickable(false).divider(index + 1 < recent.len()).show(ui);
+                continue;
+            }
             let kind = if call.voice { "Voice call" } else { "Video call" };
             let direction = if call.outgoing { "Outgoing" } else { "Incoming" };
             let contact = call.contact.filter(|c| self.contacts.iter().any(|k| k.id == *c && k.lease));
@@ -494,7 +575,7 @@ impl Ui {
                             ("Call back (video)", false, Icon::Camera, Kind::Primary),
                             ("Call back (voice)", true, Icon::Phone, Kind::Secondary),
                         ] {
-                            let ok = can_call && (!voice || self.switches.voice_calls);
+                            let ok = can_call;
                             let name = format!("{label} {}", call.peer);
                             let b = ui.add_enabled_ui(ok, |ui| components::icon_button_sized(ui, icon, &name, kind, theme::ICON_BUTTON)).inner;
                             if b.clicked() {
@@ -505,7 +586,7 @@ impl Ui {
                     if let Some(fingerprint) = blockable {
                         let label = if call.blocked { "Unblock" } else { "Block" };
                         if text_action(ui, label, &format!("{label} {}", call.peer)).clicked() {
-                            block = Some((fingerprint, !call.blocked));
+                            block = Some((fingerprint, !call.blocked, call.peer.clone()));
                         }
                     }
                 });
@@ -523,10 +604,12 @@ impl Ui {
         if let Some((contact, voice)) = back {
             self.place_call(contact, voice);
         }
-        if let Some((fingerprint, blocked)) = block {
-            self.backend.command(Command::BlockCaller { fingerprint, blocked });
-            for call in self.recent.iter_mut().filter(|c| c.fingerprint == Some(fingerprint)) {
-                call.blocked = blocked;
+        if let Some((fingerprint, blocked, name)) = block {
+            if blocked {
+                // Android asks first (`confirmBlock`).
+                self.block_confirm = Some((super::blocked::BlockTarget::Caller(fingerprint), name));
+            } else {
+                self.send_block(fingerprint, false, super::blocked::BlockFrom::Unblock);
             }
         }
     }
@@ -543,7 +626,7 @@ impl Ui {
         let status = self.call_status().unwrap_or_else(|| call.status());
         let peer = call.peer.clone();
         let verified = call.verified;
-        let (muted, talking, camera, voice) = (call.muted, call.talking, call.camera, call.voice);
+        let (muted, camera, voice) = (call.muted, call.camera, call.voice);
         let mic_state = if self.call_mic_restarting { None } else { self.call_mic.clone() };
         let camera_state = self.call_camera.clone();
         let peer_camera = call.peer_camera;
@@ -571,7 +654,8 @@ impl Ui {
         let unverified = !verified && !outgoing;
         let encrypted = phase == Phase::Active;
         let bar_height = match phase {
-            Phase::IncomingRinging => 112.0,
+            // Decline and block sits under the two round buttons.
+            Phase::IncomingRinging => if self.call_fingerprint.is_some() { 232.0 } else { 112.0 },
             Phase::Ended => 64.0,
             _ => 100.0,
         };
@@ -741,6 +825,7 @@ impl Ui {
                     "Other person's video",
                     if peer_camera { "Connecting\u{2026}" } else { "Video off" },
                     texture.map(|id| (id, self.peer_size)),
+                    self.video_fill(),
                 );
                 // The controls float over the bottom of the picture: a soft shade keeps them readable.
                 if texture.is_some() {
@@ -823,53 +908,125 @@ impl Ui {
                     });
                 }
                 if decline {
+                    // Android `offerBlockUnknownAfterDecline`: a caller with
+                    // a one-time ID can't be blocked one by one, so a plain
+                    // Decline offers Block unknown callers (read before the
+                    // decline; never when it is on or "Not now" was chosen).
+                    let one_time = self.call_fingerprint.is_none() && !self.call.as_ref().is_some_and(|c| c.verified);
                     self.with_call(|c| {
                         let _ = c.decline();
                     });
+                    if one_time && !self.switches.block_unknown && !self.switches.block_unknown_offer_dismissed {
+                        self.block_unknown_offer = true;
+                    }
+                }
+                // Android `declineAndBlockButton`: a quiet text button under
+                // the two, only for a caller that showed its real ID (a
+                // one-time ID can't be blocked one by one). It declines, then
+                // blocks without asking.
+                if let Some(fingerprint) = self.call_fingerprint.filter(|_| !accept && !decline) {
+                    ui.add_space(16.0);
+                    let (mut decline_block, mut report) = (false, false);
+                    ui.vertical_centered(|ui| {
+                        decline_block = Pill::new(super::blocked::DECLINE_AND_BLOCK).kind(Kind::Quiet).show(ui).clicked();
+                        // Android `declineAndReportButton`: the same quiet text
+                        // button under it; it declines, then reports.
+                        report = Pill::new(super::report::REPORT).kind(Kind::Quiet).show(ui).clicked();
+                    });
+                    if decline_block || report {
+                        self.with_call(|c| {
+                            let _ = c.decline();
+                        });
+                        if report {
+                            self.report_person(fingerprint);
+                        } else {
+                            self.send_block(fingerprint, true, super::blocked::BlockFrom::DeclineAndBlock);
+                        }
+                    }
                 }
             }
             Phase::OutgoingInvite | Phase::OutgoingRinging | Phase::NegotiatingMedia | Phase::Active => {
-                let mut mute = false;
-                let mut press = false;
-                let mut cam = false;
-                let mut end = false;
-                let count = if ringing_out { 1.0 } else if muted { 4.0 } else { 3.0 };
-                let size = theme::ROUND_CONTROL;
-                centered_row(ui, count * size + (count - 1.0) * 20.0, |ui| {
-                    ui.spacing_mut().item_spacing.x = 20.0;
-                    if !ringing_out {
-                        // Kind::Primary (white) shows a control that is on.
-                        let (label, kind, icon) =
-                            if muted { ("Unmute", Kind::Primary, Icon::MicOff) } else { ("Mute", Kind::Secondary, Icon::Mic) };
-                        mute = components::round_button_sized(ui, icon, label, kind, size).on_hover_text(format!("{label} (Ctrl+M)")).clicked();
-                        if muted {
-                            let talk = components::round_button_sized(ui, Icon::Mic, "Talk", if talking { Kind::Primary } else { Kind::Secondary }, size);
-                            let talk = if self.hold_call_talk { talk.interact(egui::Sense::click_and_drag()) } else { talk };
-                            #[cfg(test)]
-                            if let Some(check) = self.native_check.as_mut() { check.talk_position(talk.id, talk.rect.center()); }
-                            press = talk.is_pointer_button_down_on() || (talk.has_focus() && ui.input(|i| i.key_down(egui::Key::Space)));
-                            if self.hold_call_talk {
-                                press &= ui.input(|i| i.focused) && (talk.contains_pointer() || (talk.has_focus() && ui.input(|i| i.key_down(egui::Key::Space))));
-                            }
-                            talk.on_hover_text("Hold to talk. Release to mute again.");
+                use super::control_row::{Control, row};
+                // Android's call row: Mute, Camera, End, Flip, Speaker, End
+                // in the middle; a control with nothing to do keeps its place.
+                // While it rings out, Cancel alone.
+                let (mut mute, mut cam, mut end) = (false, false, false);
+                if ringing_out {
+                    let controls = [Control::new(Icon::HangUp, "Cancel", Kind::Live).large()];
+                    if let Some(e) = row(ui, "call-controls", &controls)[0].clone() {
+                        if focus {
+                            e.request_focus();
                         }
-                        let video_label = if camera {
-                            "Video off"
-                        } else if voice || !peer_camera {
-                            "Add video"
-                        } else {
-                            "Video on"
-                        };
-                        let (kind, icon) = if camera { (Kind::Primary, Icon::Camera) } else { (Kind::Secondary, Icon::VideoOff) };
-                        cam = components::round_button_sized(ui, icon, video_label, kind, size).on_hover_text(video_label).clicked();
+                        end = e.on_hover_text("Cancel (Ctrl+E)").clicked();
                     }
-                    let name = if ringing_out { "Cancel" } else { "End call" };
-                    let e = components::round_button_sized(ui, Icon::HangUp, name, Kind::Live, size);
-                    if focus {
-                        e.request_focus();
+                } else {
+                    let talking = self.mute_hold.talking;
+                    let (mute_caption, mute_kind, mute_icon) = if talking {
+                        ("Talking\u{2026}", Kind::Primary, Icon::Mic)
+                    } else if muted {
+                        ("Unmute", Kind::Primary, Icon::MicOff)
+                    } else {
+                        ("Mute", Kind::Secondary, Icon::Mic)
+                    };
+                    let video_label = if camera {
+                        "Video off"
+                    } else if voice || !peer_camera {
+                        "Add video"
+                    } else {
+                        "Video on"
+                    };
+                    // Kind::Primary (white) shows a control that is on.
+                    let (camera_kind, camera_icon) = if camera { (Kind::Primary, Icon::Camera) } else { (Kind::Secondary, Icon::VideoOff) };
+                    let flip_ok = camera && matches!(camera_state, Some(None)) && self.cameras > 1;
+                    let controls = [
+                        Control::new(mute_icon, mute_caption, mute_kind).name(if muted { "Unmute" } else { "Mute" }),
+                        Control::new(camera_icon, video_label, camera_kind),
+                        Control::new(Icon::HangUp, "End", Kind::Live).name("End call").large(),
+                        Control::new(Icon::Flip, "Flip", Kind::Secondary).name("Switch camera").enabled(flip_ok),
+                        Control::new(Icon::Speaker, "Speaker", Kind::Secondary).name("Audio output").enabled(self.call_outputs.len() > 1),
+                    ];
+                    let responses = row(ui, "call-controls", &controls);
+                    if let Some(m) = responses[0].clone() {
+                        // Hold Mute to talk (Android `HoldToTalkCore`): while
+                        // muted, holding it opens the microphone until it is
+                        // let go; the click that ends a hold is not Unmute.
+                        #[cfg(test)]
+                        if muted {
+                            if let Some(check) = self.native_check.as_mut() {
+                                check.talk_position(m.id, m.rect.center());
+                            }
+                        }
+                        let down = m.is_pointer_button_down_on()
+                            && ui.input(|i| i.focused)
+                            && (!self.hold_call_talk || m.contains_pointer());
+                        let step = self.mute_hold.frame(down, muted, ui.input(|i| i.time));
+                        if self.mute_hold.pressed() {
+                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+                        }
+                        if let Some(on) = step.talk {
+                            self.with_call(|c| {
+                                let _ = c.talk(on);
+                            });
+                        }
+                        let hint = if muted { "Unmute (Ctrl+M). Hold to talk." } else { "Mute (Ctrl+M)" };
+                        mute = m.on_hover_text(hint).clicked() && !step.swallow_click;
                     }
-                    end = e.on_hover_text(format!("{name} (Ctrl+E)")).clicked();
-                });
+                    if let Some(c) = responses[1].clone() {
+                        cam = c.on_hover_text(video_label).clicked();
+                    }
+                    if let Some(e) = responses[2].clone() {
+                        if focus {
+                            e.request_focus();
+                        }
+                        end = e.on_hover_text("End call (Ctrl+E)").clicked();
+                    }
+                    if responses[3].as_ref().is_some_and(|f| f.clicked()) {
+                        self.backend.command(Command::SwitchCamera);
+                    }
+                    if responses[4].as_ref().is_some_and(|s| s.clicked()) {
+                        self.output_sheet = true;
+                    }
+                }
                 let (k_mute, k_end) = ui.input_mut(|i| {
                     (
                         i.consume_key(egui::Modifiers::CTRL, egui::Key::M),
@@ -885,11 +1042,6 @@ impl Ui {
                 if cam {
                     self.with_call(|c| {
                         let _ = c.toggle_camera();
-                    });
-                }
-                if muted && press != talking {
-                    self.with_call(|c| {
-                        let _ = c.talk(press);
                     });
                 }
                 if end {
@@ -911,6 +1063,37 @@ impl Ui {
                     self.close_call();
                 }
             }
+        }
+    }
+
+    /// The Speaker button's sheet (Android `CallOutputSheet`, "Audio output"):
+    /// every output by name, the one in use marked; a pick closes it.
+    pub(super) fn call_output_sheet(&mut self, ctx: &egui::Context) {
+        let active = self.call.as_ref().is_some_and(|c| matches!(c.phase(), Phase::Active | Phase::NegotiatingMedia));
+        if !self.output_sheet || !active || self.call_outputs.len() < 2 {
+            self.output_sheet = false;
+            return;
+        }
+        let mut picked = None;
+        let response = components::dialog(ctx, "call-output", |ui| {
+            components::dialog_title(ui, "Audio output");
+            for (id, name) in &self.call_outputs {
+                let selected = self.call_output.as_deref() == Some(id.as_str());
+                let mut row = ListRow::new(name).icon(Icon::Speaker);
+                if selected {
+                    row = row.trailing(Trailing::Value("Selected".into())).a11y(format!("{name}, Selected"));
+                }
+                if row.show(ui).clicked() {
+                    picked = Some(id.clone());
+                }
+            }
+        });
+        if let Some(id) = picked {
+            self.output_sheet = false;
+            self.call_output = Some(id.clone());
+            self.backend.command(Command::CallOutput(id));
+        } else if response.should_close() {
+            self.output_sheet = false;
         }
     }
 
@@ -939,7 +1122,10 @@ impl Ui {
             self.place_call(contact.id, voice);
         }
         ui.add_space(16.0);
-        self.contact_extras(ui, &contact, 0.0, true);
+        // The wide window shows the contact sheet's text and rows here.
+        if let Some(action) = self.contact_sheet_body(ui, &contact, false) {
+            self.contact_sheet_action(&contact, action);
+        }
     }
     fn contacts_list(&mut self, ui: &mut egui::Ui, wide: bool) {
         // "Add contact" is pinned at the bottom by the shell (Ui::page_footer).
@@ -976,17 +1162,16 @@ impl Ui {
             // A lease lets this PC find them by their rotating ID; a call then
             // looks for them for up to 10 s even when the list has not seen them.
             let enabled = can_call && contact.lease;
-            // Rename, Safety code, Block and Forget wait behind "More" (Android's
-            // contact sheet), so the list is names and calls only.
-            let open = self.contact_more == Some(contact.id);
+            // Android: the row or its info ("More") button opens the contact
+            // sheet; a wide window shows the same rows in the detail pane.
             // The row draws no divider of its own here: the one after its
             // notes below separates contacts (one line, never two).
-            let (call, picked, toggled) = self.person_card(ui, contact.id, &contact.name, &contact.subtitle(), enabled, true, true, wide, (!wide).then_some(open));
-            if picked {
+            let (call, picked, toggled) = self.person_card(ui, contact.id, &contact.name, &contact.subtitle(), enabled, true, true, true, (!wide).then_some(false));
+            if picked && wide {
                 self.selected_contact = Some(contact.id);
             }
-            if toggled {
-                self.contact_more = if open { None } else { Some(contact.id) };
+            if (picked && !wide) || toggled {
+                self.contact_more = Some(contact.id);
             }
             if let Some(voice) = call {
                 self.place_call(contact.id, voice);
@@ -994,59 +1179,32 @@ impl Ui {
             if wide {
                 continue;
             }
-            self.contact_extras(ui, &contact, theme::ROW_TEXT_INSET, self.contact_more == Some(contact.id));
+            self.contact_notes(ui, &contact, theme::ROW_TEXT_INSET);
             ui.add_space(6.0);
             if index + 1 < count {
                 divider(ui, theme::ROW_TEXT_INSET);
             }
         }
     }
-    /// A contact's quiet actions and notes (under the row, or in the detail pane).
-    fn contact_extras(&mut self, ui: &mut egui::Ui, contact: &Contact, inset: f32, actions: bool) {
-        {
-            if actions { ui.horizontal(|ui| {
-                ui.add_space((inset - 10.0).max(0.0));
-                ui.spacing_mut().item_spacing.x = 2.0;
-                if text_action(ui, "Rename", &format!("Rename {}", contact.name)).clicked() {
-                    self.rename = Some((contact.id, contact.name.clone(), None));
-                    self.focus_primary = true;
-                }
-                if text_action(ui, "Safety code", &format!("Safety code with {}", contact.name)).clicked() {
-                    self.backend.command(Command::ShowSafetyCode(contact.id));
-                }
-                let label = if contact.blocked { "Unblock" } else { "Block" };
-                if text_action(ui, label, &format!("{label} {}", contact.name)).clicked() {
-                    self.backend.command(Command::SetBlocked { contact: contact.id, blocked: !contact.blocked });
-                }
-                if text_action(ui, "Forget", &format!("Forget {}", contact.name)).clicked() {
-                    self.forget = Some(contact.id);
-                }
-            }); }
-            // Notes line up under the contact's name (the row's text inset).
-            let caption = |ui: &mut egui::Ui, text: String| {
-                ui.horizontal_top(|ui| {
-                    ui.add_space(inset);
-                    ui.vertical(|ui| {
-                        ui.set_max_width(theme::READABLE_WIDTH);
-                        ui.add(egui::Label::new(RichText::new(text).size(13.0).color(SECONDARY)).wrap());
-                    });
+    /// A contact's notes under its row (its actions are on its sheet).
+    fn contact_notes(&self, ui: &mut egui::Ui, contact: &Contact, inset: f32) {
+        // Notes line up under the contact's name (the row's text inset).
+        let caption = |ui: &mut egui::Ui, text: String| {
+            ui.horizontal_top(|ui| {
+                ui.add_space(inset);
+                ui.vertical(|ui| {
+                    ui.set_max_width(theme::READABLE_WIDTH);
+                    ui.add(egui::Label::new(RichText::new(text).size(13.0).color(SECONDARY)).wrap());
                 });
-            };
-            if contact.blocked {
-                caption(ui, format!("Blocked. Calls from {} are declined without ringing.", contact.name));
-            }
-            if let Some(code) = self.safety_codes.get(&contact.id) {
-                ui.horizontal(|ui| {
-                    ui.add_space(inset);
-                    ui.label(RichText::new(code.as_str()).monospace().size(15.0).color(Color32::WHITE));
-                });
-                caption(ui, format!("Read these 60 digits with {} in person. Both screens must show exactly the same numbers.", contact.name));
-            }
-            if !contact.lease {
-                caption(ui, format!("Ask {} to scan your code too. Until then this PC can't find them nearby.", contact.name));
-            } else if !contact.nearby {
-                caption(ui, format!("{} isn't nearby right now. Calling looks for them for up to 10 seconds.", contact.name));
-            }
+            });
+        };
+        if contact.blocked {
+            caption(ui, format!("Blocked. Calls from {} are declined without ringing.", contact.name));
+        }
+        if !contact.lease {
+            caption(ui, format!("Ask {} to scan your code too. Until then this PC can't find them nearby.", contact.name));
+        } else if !contact.nearby {
+            caption(ui, format!("{} isn't nearby right now. Calling looks for them for up to 10 seconds.", contact.name));
         }
     }
 
@@ -1054,8 +1212,9 @@ impl Ui {
 
     pub(super) fn meet_screen(&mut self, ui: &mut egui::Ui) {
         let focus = std::mem::take(&mut self.focus_primary);
-        let mut back = screen_title(ui, "Add contact");
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let mut back = self.title_with_status(ui, "Add contact", Some("Back"));
+        // While the Status sheet is open, Escape closes the sheet only.
+        if self.status_open.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             back = true;
         }
         if let Some(name) = self.appear_as().map(str::to_owned) {
@@ -1071,10 +1230,25 @@ impl Ui {
         egui::ScrollArea::vertical().id_salt("meet").auto_shrink([false, false]).show(ui, |ui| {
             let Some(meet) = self.meet.as_mut() else { return };
             let busy = matches!(meet.state, Some(MeetEvent::Searching) | Some(MeetEvent::Ask { .. }));
+            // Android's segments: Scan their code | Show my code.
+            let mut segment = usize::from(meet.show_code);
+            if components::segmented(ui, &[SEG_SCAN, SEG_SHOW], &mut segment) {
+                meet.show_code = segment == 1;
+                // The camera is on only while "Scan their code" is shown.
+                if meet.show_code && meet.camera {
+                    camera = Some(false);
+                }
+            }
+            ui.add_space(16.0);
+            // What happened to this PC's code ("Asha scanned your code"), on both segments.
+            if let Some(note) = &meet.code_note {
+                ui.label(emphasis(note));
+                ui.add_space(8.0);
+            }
             // Scan their code: the camera, or the code pasted.
             let mut scan_column = |ui: &mut egui::Ui, meet: &mut Meet| {
                 ui.set_max_width(MEET_COLUMN_MAX);
-                ui.label(RichText::new("Scan their code").size(20.0).family(egui::FontFamily::Name("Heading".into())));
+                // The segment above names this part (Android has no heading here).
                 ui.label(RichText::new("Stay close to each other.").size(14.0).color(SECONDARY));
                 ui.add_space(12.0);
                 // Their code by the webcam (the camera is on only while this is shown).
@@ -1130,15 +1304,16 @@ impl Ui {
                         ui.label(emphasis(&format!("Is this {name}'s screen you scanned?")).size(18.0));
                         ui.label(RichText::new("Say yes only if you can see the other phone yourself.").size(13.0).color(SECONDARY));
                         ui.add_space(6.0);
-                        let label = ui.label(RichText::new("Name on this PC").size(14.0).color(SECONDARY));
+                        // Android "Save contact as": only you see it; empty keeps their ID.
+                        let label = ui.label(RichText::new(SAVE_AS).size(14.0).color(SECONDARY));
+                        ui.label(RichText::new(SAVE_AS_MESSAGE).size(13.0).color(SECONDARY));
                         let field = ui
                             .add(egui::TextEdit::singleline(&mut meet.name).margin(egui::vec2(14.0, 12.0)).background_color(theme::RAISED).desired_width(f32::INFINITY))
                             .labelled_by(label.id);
                         crate::ui::accessible_set_value(ui, &field, &mut meet.name, None);
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            let named = !meet.name.trim().is_empty();
-                            let yes = Pill::new("Yes, it is").min_width(140.0).enabled(named).show(ui);
+                            let yes = Pill::new("Yes, it is").min_width(140.0).show(ui);
                             if yes.clicked() {
                                 answer = Some(true);
                             }
@@ -1184,10 +1359,20 @@ impl Ui {
                             visibility_note.clone().unwrap_or_else(|| "Getting ready to be visible\u{2026}".into())
                         };
                         ui.add(egui::Label::new(RichText::new(status).size(13.0).color(SECONDARY)).wrap());
-                        if let Some(note) = &meet.code_note {
-                            ui.label(emphasis(note));
+                        // The code text is not drawn or read out: copy it instead.
+                        ui.add_space(8.0);
+                        if Pill::new("Copy code").kind(Kind::Secondary).show(ui).clicked() {
+                            meet.copy_requested = true;
                         }
-                        ui.add(egui::Label::new(RichText::new(code).monospace().size(11.0).color(Color32::from_gray(110))).wrap());
+                        match meet.copied {
+                            Some(true) => {
+                                ui.label(RichText::new("Copied. MeshLive removes it from the clipboard after 60 seconds.").size(13.0).color(SECONDARY));
+                            }
+                            Some(false) => {
+                                ui.label(RichText::new("Couldn't copy. Another app is using the clipboard. Try again.").size(13.0).color(SECONDARY));
+                            }
+                            None => {}
+                        }
                     }
                     None => {
                         let text = visibility_note.clone().unwrap_or_else(|| "Getting your code ready\u{2026}".into());
@@ -1195,28 +1380,24 @@ impl Ui {
                     }
                 }
             };
-            if ui.available_width() >= 760.0 {
-                // Wide window: scan on the left, your code on the right.
-                let column = ((ui.available_width() - 64.0) / 2.0).min(MEET_COLUMN_MAX);
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(column);
-                        scan_column(ui, meet);
-                    });
-                    ui.add_space(64.0);
-                    ui.vertical(|ui| {
-                        ui.set_width(column);
-                        code_column(ui, meet);
-                    });
-                });
+            // Only the chosen segment is on screen (this PC's code only on
+            // "Show my code"); the window stays out of captures either way.
+            if meet.show_code {
+                code_column(ui, meet);
             } else {
                 scan_column(ui, meet);
-                ui.add_space(28.0);
-                code_column(ui, meet);
             }
         });
         if let Some(on) = camera {
             self.meet_camera(on);
+        }
+        if let Some(meet) = self.meet.as_mut() {
+            if std::mem::take(&mut meet.copy_requested) {
+                if let Some(code) = meet.own_code.clone() {
+                    meet.copied = None;
+                    self.clipboard_request = Some(code);
+                }
+            }
         }
         if scan {
             self.meet_scan();
@@ -1233,8 +1414,9 @@ impl Ui {
 
     pub(super) fn golive_screen(&mut self, ui: &mut egui::Ui) {
         let focus = std::mem::take(&mut self.focus_primary);
-        let mut back = screen_title(ui, "Go live");
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !self.audio_disclosure && !self.live_exposure {
+        let mut back = self.title_with_status(ui, "Go live", Some("Back"));
+        // While the Status sheet is open, Escape closes the sheet only.
+        if self.status_open.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) && !self.audio_disclosure && !self.live_exposure {
             back = true;
         }
         ui.add_space(12.0);
@@ -1249,6 +1431,7 @@ impl Ui {
         // (they scroll), so it is on screen at any window height.
         let pinned = if running { 0.0 } else { theme::BUTTON_HEIGHT_LARGE + 24.0 };
         let mut start_clicked = false;
+        let mut switch = false;
         let ready = gate.is_none() && self.golive.title_valid();
         egui::ScrollArea::vertical()
             .id_salt("golive")
@@ -1280,96 +1463,126 @@ impl Ui {
                 if self.live_consent_required {
                     ui.add_space(12.0);
                     if self.golive.kind == LiveKind::Video {
-                        ui.horizontal_wrapped(|ui| { for (w, h) in [(426, 240), (640, 360), (854, 480)] {
-                            if chip(ui, &format!("{w} × {h}"), (self.live_settings.width, self.live_settings.height) == (w, h), true).clicked() { self.live_settings.width = w; self.live_settings.height = h; }
-                        }});
-                        ui.horizontal_wrapped(|ui| { for fps in [15, 24, 30] { if chip(ui, &format!("{fps} fps"), self.live_settings.fps == fps, true).clicked() { self.live_settings.fps = fps; } }});
-                        let switches = meshlive::video::codecs::Switches::current();
-                        // Two fixed rows: in this scroll area horizontal_wrapped did not
-                        // wrap, so four codec chips ran past a 640 px window and widened
-                        // the page (and the bitrate slider) beyond it.
-                        for row in [[("VP9", 2), ("AV1 (hardware)", 3)], [("HEVC (hardware)", 5), ("H.264 (hardware)", 4)]] {
-                            if !row.iter().any(|(_, codec)| switches.codec_on(*codec)) { continue; }
-                            ui.horizontal_wrapped(|ui| { for (label, codec) in row {
-                                if !switches.codec_on(codec) { continue; }
-                                if chip(ui, label, self.live_settings.codec == codec, true).clicked() { self.live_settings.codec = codec; }
-                            }});
-                        }
-                        ui.add_space(8.0);
-                        components::value_slider(ui, "Video bitrate", &mut self.live_settings.kbps, 100..=1500, 25, "kbps");
+                        // The encoder and quality are Settings > Manual video's
+                        // (Android); Go live says what it will send.
+                        let s = self.live_request();
+                        let mode = if self.manual_video { "Manual" } else { "Standard" };
+                        ui.label(theme::caption(format!(
+                            "Video quality: {mode} \u{b7} {} \u{d7} {}, {} fps, {} kbps, {}. Change it in Settings \u{203a} Manual video.",
+                            s.width,
+                            s.height,
+                            s.fps,
+                            s.kbps,
+                            super::settings::codec_name(s.codec)
+                        )));
                     } else {
                         ui.horizontal_wrapped(|ui| { for (label, preset) in [("Low data · 16 kbps", 1), ("Voice · 24 kbps", 2), ("Music · 48 kbps", 3)] {
                             if chip(ui, label, self.live_settings.radio_preset == preset, true).clicked() { self.live_settings.radio_preset = preset; }
                         }});
                     }
                 }
-                if !self.switches.title_pages {
-                    ui.label(
-                        RichText::new("Viewers see the title only after they join.")
-                            .small()
-                            .color(SECONDARY),
-                    );
-                }
                 if let Some(error) = self.golive.error {
                     ui.add_space(8.0);
                     ui.label(error);
                 }
             } else {
-                live_badge(ui, &self.golive.status());
+                // Android's live header: the LIVE badge with the state, and the timer.
+                let now = self.now();
+                let elapsed = self.golive.elapsed(now);
+                ui.horizontal(|ui| {
+                    live_badge(ui, &self.golive.status());
+                    if let Some(seconds) = elapsed {
+                        ui.label(RichText::new(live_timer(seconds)).size(15.0).color(Color32::WHITE).monospace());
+                    }
+                });
+                if elapsed.is_some() {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+                }
                 ui.add_space(4.0);
                 if self.golive.title.is_empty() {
                     ui.label(theme::secondary(if self.golive.kind == LiveKind::Video { "Video and audio" } else { "Audio only" }));
                 } else {
                     ui.label(theme::secondary(self.golive.title.clone()));
                 }
-                ui.add_space(28.0);
                 let starting = self.golive.state == LiveState::Starting;
+                let paused = self.golive.state == LiveState::Paused;
                 let video = self.golive.kind == LiveKind::Video;
-                let count = if video { 4.0 } else { 3.0 };
-                centered_row(ui, count * theme::ROUND_CONTROL + (count - 1.0) * 28.0, |ui| {
-                    ui.spacing_mut().item_spacing.x = 28.0;
-                    let paused = self.golive.state == LiveState::Paused;
-                    // Kind::Primary (white) marks a control that is on (paused, muted, camera off).
-                    let (label, kind) = if paused { ("Resume", Kind::Primary) } else { ("Pause", Kind::Secondary) };
-                    if ui.add_enabled_ui(!starting, |ui| components::round_button(ui, Icon::Broadcast, label, kind)).inner.clicked() {
-                        self.golive.toggle_pause();
-                        let p = self.golive.state == LiveState::Paused;
-                        self.backend.command(Command::PauseLive(p));
-                    }
-                    let (label, kind, icon) =
-                        if self.golive.muted { ("Unmute", Kind::Primary, Icon::MicOff) } else { ("Mute", Kind::Secondary, Icon::Mic) };
-                    if ui.add_enabled_ui(!starting, |ui| components::round_button(ui, icon, label, kind)).inner.clicked() {
-                        self.golive.muted = !self.golive.muted;
-                        let m = self.golive.muted;
-                        self.backend.command(Command::MuteLive(m));
-                    }
-                    if video {
-                        let (label, kind, icon) = if self.golive.camera_off {
-                            ("Camera on", Kind::Primary, Icon::VideoOff)
-                        } else {
-                            ("Camera off", Kind::Secondary, Icon::Camera)
-                        };
-                        if ui.add_enabled_ui(!starting, |ui| components::round_button(ui, icon, label, kind)).inner.clicked() {
-                            self.golive.camera_off = !self.golive.camera_off;
-                            let off = self.golive.camera_off;
-                            self.backend.command(Command::LiveCamera(!off));
-                        }
-                    }
-                    let stop = components::round_button(ui, Icon::Stop, "Stop", Kind::Live);
+                if !video {
+                    // Audio only: the microphone's level (Android `audioLevelMeter`).
+                    ui.add_space(16.0);
+                    ui.vertical_centered(|ui| {
+                        super::control_row::level_meter(ui, "Microphone level", if paused { 0.0 } else { self.golive.level });
+                    });
+                }
+                ui.add_space(28.0);
+                use super::control_row::{Control, row};
+                // Android `LiveControlSlots`: video Mute, Camera, End, Flip,
+                // Pause; audio only Mute, End, Pause. End stays in the middle.
+                let (mute_caption, mute_kind, mute_icon) =
+                    if self.golive.muted { ("Unmute", Kind::Primary, Icon::MicOff) } else { ("Mute", Kind::Secondary, Icon::Mic) };
+                let (camera_caption, camera_kind, camera_icon) =
+                    if self.golive.camera_off { ("Camera on", Kind::Primary, Icon::VideoOff) } else { ("Camera off", Kind::Secondary, Icon::Camera) };
+                let (pause_caption, pause_kind, pause_icon) =
+                    if paused { ("Resume", Kind::Primary, Icon::Broadcast) } else { ("Pause", Kind::Secondary, Icon::Pause) };
+                let mute = Control::new(mute_icon, mute_caption, mute_kind).enabled(!starting && !paused);
+                let end = Control::new(Icon::Stop, "End", Kind::Live).name("Stop broadcast").large();
+                let pause = Control::new(pause_icon, pause_caption, pause_kind).enabled(!starting);
+                let controls: Vec<Control> = if video {
+                    vec![
+                        mute,
+                        Control::new(camera_icon, camera_caption, camera_kind).enabled(!starting && !paused),
+                        end,
+                        Control::new(Icon::Flip, "Flip", Kind::Secondary)
+                            .name("Switch camera")
+                            .shown(self.cameras > 1)
+                            .enabled(!starting && !paused && !self.golive.camera_off),
+                        pause,
+                    ]
+                } else {
+                    vec![mute, end, pause]
+                };
+                let responses = row(ui, "live-controls", &controls);
+                let (end_at, pause_at) = if video { (2, 4) } else { (1, 2) };
+                if responses[pause_at].as_ref().is_some_and(|r| r.clicked()) {
+                    self.golive.toggle_pause();
+                    let p = self.golive.state == LiveState::Paused;
+                    self.backend.command(Command::PauseLive(p));
+                }
+                if responses[0].as_ref().is_some_and(|r| r.clicked()) {
+                    self.golive.muted = !self.golive.muted;
+                    let m = self.golive.muted;
+                    self.backend.command(Command::MuteLive(m));
+                }
+                if video && responses[3].as_ref().is_some_and(|r| r.clicked()) {
+                    self.backend.command(Command::SwitchCamera);
+                }
+                if video && responses[1].as_ref().is_some_and(|r| r.clicked()) {
+                    self.golive.camera_off = !self.golive.camera_off;
+                    let off = self.golive.camera_off;
+                    self.backend.command(Command::LiveCamera(!off));
+                }
+                if let Some(stop) = responses[end_at].as_ref() {
                     if focus {
                         stop.request_focus();
                     }
                     if stop.clicked() {
                         self.stop_live();
                     }
-                });
-                if self.golive.kind == LiveKind::AudioOnly {
+                }
+                if !video {
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         ui.set_max_width(520.0);
                         ui.label(theme::caption(
                             "Mute keeps the microphone open and sends silence. Pause stops the microphone. Audio that was already sent may still play on other phones.",
                         ));
+                        // Android `audioSwitchToVideoButton`: only while live.
+                        if matches!(self.golive.state, LiveState::Live | LiveState::Paused) {
+                            ui.add_space(12.0);
+                            if Pill::new("Switch to video").kind(Kind::Secondary).icon(Icon::Camera).show(ui).clicked() {
+                                switch = true;
+                            }
+                        }
                     });
                 }
             }
@@ -1394,6 +1607,9 @@ impl Ui {
                 self.start_live();
             }
         }
+        if switch {
+            self.switch_to_video();
+        }
         if back {
             // A running broadcast keeps running; Back only closes this screen.
             self.golive_open = false;
@@ -1414,6 +1630,8 @@ pub(super) fn home_go_live(running: bool) -> Pill<'static> {
 const MEET_COLUMN_MAX: f32 = 720.0;
 /// From this width the Live page shows streams as a grid of cards.
 const GRID_FROM: f32 = 900.0;
+/// Calls > Nearby shows "Search people" above this many people (Android).
+const SEARCH_FROM: usize = 8;
 /// A stream card is at least this wide.
 const CARD_MIN: f32 = 320.0;
 /// The Live page on a backend without live streams.
@@ -1494,15 +1712,17 @@ impl Ui {
     }
 }
 
-/// The video area: the picture as large as fits (FIT, never stretched,
-/// already upright), with rounded corners, on plain black (no framed box).
-/// Without a picture, a quiet panel with the state.
+/// The video area: with `fill`, the picture covering it (FILL, Android's
+/// default: never stretched, already upright, cut evenly at the sides that
+/// run past), else as large as fits (FIT), with rounded corners, on plain
+/// black (no framed box). Without a picture, a quiet panel with the state.
 pub(super) fn video_stage(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     name: &str,
     status: &str,
     texture: Option<(egui::TextureId, [u32; 2])>,
+    fill: bool,
 ) -> egui::Rect {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size.x.max(0.0), size.y.max(0.0)), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("{name}. {status}")));
@@ -1510,8 +1730,12 @@ pub(super) fn video_stage(
     match texture {
         Some((id, picture)) => {
             ui.painter().rect_filled(rect, radius, Color32::BLACK);
-            let (shown, _) = call_layout::fit(rect, picture, 0);
-            egui::Image::new((id, shown.size())).corner_radius(radius).paint_at(ui, shown);
+            if fill {
+                egui::Image::new((id, rect.size())).uv(call_layout::fill(rect, picture)).corner_radius(radius).paint_at(ui, rect);
+            } else {
+                let (shown, _) = call_layout::fit(rect, picture, 0);
+                egui::Image::new((id, shown.size())).corner_radius(radius).paint_at(ui, shown);
+            }
         }
         None => {
             ui.painter().rect_filled(rect, radius, Color32::from_gray(14));
@@ -1519,6 +1743,32 @@ pub(super) fn video_stage(
         }
     }
     rect
+}
+
+/// "Warn when video freezes" on the picture (Android's stale badge and
+/// "Last update" label): a stalled picture is dimmed under what happened and
+/// when the last picture came; a lost signal (the area already says so) adds
+/// when; a fresh picture gets a small age in its corner.
+fn freeze_overlay(ui: &mut egui::Ui, area: egui::Rect, freeze: Freeze) {
+    let painter = ui.painter().with_clip_rect(area);
+    let last = |age| format!("Last picture {} ago", frame_age_text(age));
+    match freeze {
+        Freeze::Waiting => {}
+        Freeze::Fresh(age) => {
+            let galley = painter.layout_no_wrap(format!("Last update {} ago", frame_age_text(age)), egui::FontId::proportional(13.0), Color32::WHITE);
+            let at = egui::pos2(area.left() + 12.0, area.bottom() - 12.0 - galley.size().y);
+            painter.rect_filled(egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(6.0, 3.0)), 6, Color32::from_black_alpha(140));
+            painter.galley(at, galley, Color32::WHITE);
+        }
+        Freeze::Stalled(age) => {
+            painter.rect_filled(area, 16, Color32::from_black_alpha(160));
+            painter.text(area.center() - egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, VIEWER_PICTURE_STALLED, egui::FontId::proportional(18.0), Color32::WHITE);
+            painter.text(area.center() + egui::vec2(0.0, 14.0), egui::Align2::CENTER_CENTER, last(age), egui::FontId::proportional(14.0), SECONDARY);
+        }
+        Freeze::SignalLost(age) => {
+            painter.text(area.center() + egui::vec2(0.0, 26.0), egui::Align2::CENTER_CENTER, last(age), egui::FontId::proportional(14.0), SECONDARY);
+        }
+    }
 }
 
 /// One line for the streams this PC can't watch: how many, and the one
@@ -1589,6 +1839,22 @@ fn text_action(ui: &mut egui::Ui, label: &str, name: &str) -> egui::Response {
 /// The green verified mark beside a name (green only for verified/answer).
 fn verified_mark(painter: &egui::Painter, center: egui::Pos2, size: f32) {
     draw_icon(painter, egui::Rect::from_center_size(center, egui::vec2(size, size)), Icon::Verified, theme::POSITIVE);
+}
+
+/// A Recent row for a call "Block unknown callers" declined (Android
+/// `recent_blocked_call`).
+pub(super) const BLOCKED_CALL: &str = "Blocked call";
+
+/// How long ago, in whole minutes or hours ("just now", "5 minutes ago").
+fn ago(elapsed: std::time::Duration) -> String {
+    let minutes = elapsed.as_secs() / 60;
+    match minutes {
+        0 => "just now".into(),
+        1 => "1 minute ago".into(),
+        2..=59 => format!("{minutes} minutes ago"),
+        60..=119 => "1 hour ago".into(),
+        _ => format!("{} hours ago", minutes / 60),
+    }
 }
 
 /// "02:13" (or "1:02:13").

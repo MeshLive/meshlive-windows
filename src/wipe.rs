@@ -28,6 +28,8 @@ pub const FILES: &[&str] = &[
     "discovery-epoch.bin",
     "profile.bin",
     "settings.bin",
+    // SEC-11: the record of an identity key held by the security chip.
+    "identity-key-provider",
     "trace.log",
     "trace.on",
     // Crash reports (crate::crash): a ring of five fixed names and the marker.
@@ -41,6 +43,8 @@ pub const FILES: &[&str] = &[
     "crash/local-3.dmp",
     "crash/shown",
 ];
+/// The record of a chip-held identity key (`identity::PROVIDER_RECORD`).
+const KEY_RECORD: &str = "identity-key-provider";
 /// Folders MeshLive creates; removed only when empty.
 const FOLDERS: &[&str] = &["identity-verification", "crash"];
 
@@ -57,8 +61,10 @@ pub struct Report {
     pub complete: bool,
 }
 
-fn storage_guard_enabled() -> bool {
-    std::env::var("MESHLIVE_WIPE_STORAGE_GUARD").as_deref() != Ok("0")
+/// The `=0` control arm deletes through links: only a debug or test-hooks
+/// build reads it (SEC-13).
+pub(crate) fn storage_guard_enabled() -> bool {
+    crate::control_arms::var("MESHLIVE_WIPE_STORAGE_GUARD").as_deref() != Some("0")
 }
 
 pub(crate) fn linked_or_unreadable(path: &Path) -> bool {
@@ -144,6 +150,12 @@ fn run_with_guard(dir: &Path, delete_key: &mut dyn FnMut() -> Result<bool, Strin
     }
     for (name, path) in allowlisted(dir) {
         if guarded && linked_known(dir, &path) {
+            report.failed.push(name);
+            continue;
+        }
+        // SEC-11 review: the record naming the chip that holds the key stays
+        // until the key is confirmed deleted, so the resumed wipe retries it.
+        if report.key_error.is_some() && name.starts_with(KEY_RECORD) && std::fs::symlink_metadata(&path).is_ok() {
             report.failed.push(name);
             continue;
         }
@@ -337,6 +349,23 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// SEC-11: Delete everything deletes an identity key held by this PC's
+    /// security chip (a software key where there is none) and its record.
+    #[test]
+    fn a_wipe_deletes_an_identity_key_held_by_the_security_chip_and_its_record() {
+        let dir = scratch();
+        let nonce: String = crate::crypto::random_nonce().unwrap().iter().map(|b| format!("{b:02x}")).collect();
+        let name = format!("io.github.meshlive.app.wipe-chip-test.{nonce}");
+        let kind = crate::identity::Identity::create_test_key_in(&name, &dir, true).unwrap();
+        assert_eq!(dir.join(crate::identity::PROVIDER_RECORD).exists(), kind == crate::identity::KeyProvider::Platform);
+        let report = run(&dir, &mut || crate::identity::Identity::delete_test_key_in(&name, &dir).map_err(|e| format!("{e:?}")));
+        assert!(report.key_deleted && report.complete, "{report:?}");
+        assert!(!dir.join(crate::identity::PROVIDER_RECORD).exists(), "the record goes too");
+        assert_eq!(crate::identity::Identity::delete_test_key_in(&name, &dir), Ok(false), "the key is gone from every provider");
+        eprintln!("SEC-11 wipe test key was held by {kind:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn an_incomplete_wipe_keeps_the_marker_for_the_next_launch() {
         let dir = scratch();
@@ -361,6 +390,11 @@ mod tests {
         let (report, opened) = resume_with_guard(Some(&dir), true, &mut || Ok(false), || 7);
         assert!(report.unwrap().complete && opened == Some(7) && !pending(&dir));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_identity_key_record_is_on_the_wipe_allowlist() {
+        assert!(FILES.contains(&crate::identity::PROVIDER_RECORD));
     }
 
     #[test]

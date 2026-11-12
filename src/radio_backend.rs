@@ -87,6 +87,14 @@ fn scan_retry_ms(error: &meshlive::bluetooth::Error, failures: u32) -> Option<u6
 /// An unanswered outgoing call is cancelled after this when the callee never
 /// said Ringing (setup cap, as call_phone).
 const RING_SECONDS: u64 = 90;
+/// The ending of a call whose peer stopped receiving this PC
+/// (`TxWatch::ever_stalled`): this PC's own Bluetooth is named only when
+/// Windows also stopped answering an advertising start here (`listen_stuck`);
+/// otherwise the call keeps the ending its signals give.
+fn stalled_call_end(peer_stopped_receiving: bool, pc_bluetooth_not_responding: bool) -> Option<crate::ui::backend::CallEndReason> {
+    (peer_stopped_receiving && pc_bluetooth_not_responding).then_some(crate::ui::backend::CallEndReason::PcBluetoothNotResponding)
+}
+
 /// PROTOCOL "Ring timeout" (design decision 2026-10-21, as Android): the caller
 /// sends Cancel 60 s after the callee's Ringing; the callee shows "Missed
 /// call" when that Cancel arrives, and its own safety stop sends
@@ -150,7 +158,7 @@ pub struct RadioBackend {
     /// Set by the worker once the dialled call link is up: from then on a
     /// Cancel/Hang up must reach the peer as a signal, so the dial's abort
     /// flag (which also stops every link write) is no longer raised
-    /// (app call s22-app-video-1: the Hang up failed "Call: Cancelled" and
+    /// (a PC-to-S22 app call: the Hang up failed "Call: Cancelled" and
     /// the phone waited 2.5 s for the link to drop).
     link_up: Arc<AtomicBool>,
     busy: Arc<AtomicBool>,
@@ -167,10 +175,21 @@ impl RadioBackend {
         if let Some(qr) = self.qr.take() { qr.close_and_wait(); }
         if let Some(flag) = self.dialing.take() { flag.store(true, Ordering::Release); }
         let (ack, done) = mpsc::channel();
-        if self.jobs.send(Job::WipeBarrier(ack)).is_err() || done.recv().is_err() {
+        let acked = self.jobs.send(Job::WipeBarrier(ack)).is_ok() && match done.recv_timeout(WIPE_BARRIER_WAIT) {
+            Ok(()) => true,
+            Err(RecvTimeoutError::Disconnected) => false,
+            Err(RecvTimeoutError::Timeout) => {
+                // A worker stuck in a Windows call: the UI thread does not
+                // wait for it. The wipe job stays queued ahead of anything
+                // later, as on the default path (no barrier there).
+                trace("wipe_barrier", &format!("timeout_ms={} stuck_at={}", WIPE_BARRIER_WAIT.as_millis(), meshlive::bluetooth::peripheral::current_step()));
+                true
+            }
+        };
+        if !acked {
             // A failed worker can drop its inbox before its stream fields.
             // Join its cleanup before allowing the decorator to delete files.
-            if let Some(worker) = self.worker.take() { let _ = worker.join(); }
+            if let Some(worker) = self.worker.take() { let _ = join_bounded(worker, WIPE_BARRIER_WAIT); }
         }
         self.watch_available = false;
     }
@@ -220,9 +239,37 @@ impl Drop for RadioBackend {
         }
         let _ = self.jobs.send(Job::Quit);
         if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+            // This runs on the UI thread (Show sample people, app exit): never
+            // wait on a worker stuck inside a Windows Bluetooth call
+            // (2026-11-06: the window froze for 8 min). A worker that did not
+            // stop in time is left to finish on its own: Quit is queued and
+            // its inbox is closed, so it stops its scan, announcement and data
+            // service as soon as the Windows call returns. If the app exits
+            // first, Windows removes this process's GATT services and
+            // advertisements with the process.
+            if !join_bounded(worker, WORKER_STOP_WAIT) {
+                trace("worker_abandoned", &format!("waited_ms={} stuck_at={}", WORKER_STOP_WAIT.as_millis(), meshlive::bluetooth::peripheral::current_step()));
+            }
         }
     }
+}
+
+/// How long dropping the backend waits on the UI thread for the worker.
+const WORKER_STOP_WAIT: Duration = Duration::from_secs(2);
+/// How long Delete everything waits on the UI thread for the stream barrier.
+const WIPE_BARRIER_WAIT: Duration = Duration::from_secs(5);
+
+/// Joins `worker` if it ends within `limit`; false: still running, detached.
+fn join_bounded(worker: JoinHandle<()>, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while !worker.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = worker.join();
+    true
 }
 
 impl Backend for RadioBackend {
@@ -561,8 +608,10 @@ struct ShowScan {
     answering: bool,
 }
 
-fn call_capture_fence() -> Option<meshlive::stream_source::CaptureFence> {
-    (std::env::var("MESHLIVE_CALL_CAPTURE_FENCE").as_deref() != Ok("0")).then(Default::default)
+/// The `=0` control arm keeps sending microphone audio queued before Mute, so
+/// only a debug or test-hooks build reads it (SEC-13).
+pub(crate) fn call_capture_fence() -> Option<meshlive::stream_source::CaptureFence> {
+    (meshlive::control_arms::var("MESHLIVE_CALL_CAPTURE_FENCE").as_deref() != Some("0")).then(Default::default)
 }
 
 struct ActiveCall {
@@ -581,7 +630,7 @@ struct ActiveCall {
     /// Optional fresh-device acknowledgement across Unmute; the control arm
     /// keeps the existing continuous capture behavior.
     capture_fence: Option<meshlive::stream_source::CaptureFence>,
-    /// Play the ringback while the callee rings (setting).
+    /// Play the ringback while the callee rings (outgoing calls; no switch).
     ringback: bool,
     /// When the callee's Ringing arrived (outgoing calls).
     ringing_at: Option<Instant>,
@@ -621,6 +670,11 @@ struct ActiveCall {
     presence_answered: bool,
     /// When `le_link` was last traced (peripheral calls).
     link_traced: Option<Instant>,
+    /// Design SR: the scanner, server or opening in progress, if any.
+    renewal: meshlive::bluetooth::renewal::RenewalIo,
+    /// The send side against the peer's delivery reports: the `call_tx`
+    /// counters and whether the peer stopped receiving (`peer_rx_stalled`).
+    tx_watch: meshlive::call_rate::TxWatch,
 }
 
 impl ActiveCall {
@@ -710,6 +764,7 @@ impl ActiveCall {
                 meshlive::call_audio::Event::RenderUnavailable(reason) => trace("speaker_unavailable", &reason),
                 meshlive::call_audio::Event::RenderOpened(detail) => trace("speaker_open", &detail),
                 meshlive::call_audio::Event::RenderReopen => trace("speaker_reopen", "reason=write_timeout"),
+                meshlive::call_audio::Event::Outputs { outputs, current } => updates.push(Update::CallOutputs { outputs, current: Some(current) }),
                 meshlive::call_audio::Event::Speed { speed, lag_ms, baseline_ms } => trace(
                     "speed",
                     &format!(
@@ -857,6 +912,47 @@ impl Stores {
             _ => None,
         }
     }
+    /// The contact a sighted version 5 stream offer belongs to (exactly one).
+    fn recognise_stream(&mut self, rdi: &[u8; 6]) -> Option<[u8; 16]> {
+        let epoch = self.epoch();
+        if !self.vault.ensure_loaded(epoch) {
+            return None;
+        }
+        match self.vault.recognise_stream_offer(rdi, epoch, wall_ms()).as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
+    }
+    /// Android `revokeForBlocked` through the worker's one vault: a block
+    /// made now (`fail_closed`) revokes a lease that is current; the
+    /// start-up reconcile passes false. An unreadable list or store skips it.
+    fn revoke_blocked(&mut self, fail_closed: bool) -> usize {
+        let Ok(blocked) = self.blocks.list() else { return 0 };
+        if blocked.is_empty() {
+            return 0;
+        }
+        let epoch = self.epoch();
+        if !self.vault.ensure_loaded(epoch) {
+            return 0;
+        }
+        let mut revoked = 0;
+        for fingerprint in &blocked {
+            let node: [u8; 16] = fingerprint[..16].try_into().unwrap();
+            if self.vault.revoke_for_blocked(&node, epoch, fail_closed) {
+                revoked += 1;
+            }
+        }
+        revoked
+    }
+    /// Android's start-up blocked reconcile: a block whose presence
+    /// revocation could not run (the store was unreadable then) is applied
+    /// now.
+    fn reconcile_blocked(&mut self) {
+        let revoked = self.revoke_blocked(false);
+        if revoked > 0 {
+            trace("presence_reconcile", &format!("revoked_blocked={revoked}"));
+        }
+    }
     /// Contacts whose lease this PC holds.
     fn leased(&mut self) -> Vec<[u8; 16]> {
         let epoch = self.epoch();
@@ -867,6 +963,60 @@ impl Stores {
             .state()
             .map(|s| s.contacts.iter().filter(|c| c.lease.is_some()).map(|c| c.node_id).collect())
             .unwrap_or_default()
+    }
+}
+
+/// WP6: the owner starts this PC's capture, or says media is ready, only for
+/// a call whose peer is not blocked (the session already holds both; this is
+/// the owner's own check).
+fn owner_may_start_media(
+    session: &mut meshlive::call_session::CallSession<meshlive::opus::Decoder>,
+    now_ns: u64,
+    notice: &Notice,
+) -> bool {
+    // WP6NF finding 4: the newest policy, not a stale latch.
+    session.refresh_policy(now_ns);
+    !session.peer_blocked() && matches!(notice, Notice::StartMedia { .. } | Notice::PeerHeader(_))
+}
+
+/// WP6NG finding 8: the ordinary ring and no-answer timeouts, except for a
+/// blocked peer: its own delayed end owns the call's end and outcome.
+fn owner_ring_timeout(
+    session: &mut meshlive::call_session::CallSession<meshlive::opus::Decoder>,
+    now_ns: u64,
+    media: bool,
+    placed: Duration,
+    ringing: Option<Duration>,
+) -> Option<Signal> {
+    session.refresh_policy(now_ns);
+    if media || session.peer_blocked() {
+        return None;
+    }
+    ring_timeout(session.phase(), placed, ringing)
+}
+
+/// WP6: say at each call start when a peer's identity cannot be screened
+/// against the block list (CF-CALL-24 fails open; an open design question).
+fn reveal_screen_trace(stores: bool) {
+    if !stores {
+        trace("reveal_screen", "unavailable reason=no_stores fail_open=true");
+    }
+    if !meshlive::call_policy::CallPolicy::global().snapshot().block_list_known() {
+        trace("reveal_screen", "blocked=unreadable fail_open=true");
+    }
+}
+
+/// Whether a stream route is attributed to a blocked person (Android
+/// `hideByPrefix`): a rotating offer by the one contact it is recognised as,
+/// a fixed one by its 48-bit node prefix. Nobody is blocked: false at once.
+fn stream_source_blocked(a: &meshlive::discovery::Announcement, blocked: &[[u8; 32]], stores: &mut Option<Stores>) -> bool {
+    if blocked.is_empty() {
+        return false;
+    }
+    if a.version == 5 {
+        stores.as_mut().and_then(|s| s.recognise_stream(&a.prefix)).is_some_and(|node| meshlive::blocking::node_blocked(blocked, &node))
+    } else {
+        meshlive::blocking::prefix_blocked(blocked, &a.prefix)
     }
 }
 
@@ -982,6 +1132,12 @@ struct Worker {
     call: Option<ActiveCall>,
     pending_dial: Option<PendingDial>,
     watching: Option<crate::stream_backend::Task>,
+    /// Routes whose source is a blocked person (Android `PersonPolicy`
+    /// hidden streams), shared with the watch worker; for this run only,
+    /// emptied by the wipe.
+    hidden_streams: Arc<std::sync::Mutex<meshlive::stream_watch::HiddenRoutes>>,
+    /// The blocked fingerprints for the Live filter (read again after a change).
+    blocked_cache: Option<Vec<[u8; 32]>>,
     source: Option<crate::source_backend::Task>,
     source_settings: meshlive::stream_source::Settings,
     source_consent: bool,
@@ -1009,8 +1165,6 @@ struct Worker {
     listen: Option<meshlive::callee::Listening>,
     /// The Receive calls switch (UI default on).
     receive_calls: bool,
-    /// The ringback setting (UI default on).
-    ringback: bool,
     /// Bluetooth is off (CF-LIFE-13): nothing is announced.
     radio_off: bool,
     /// After a failed start, the next attempt.
@@ -1019,6 +1173,9 @@ struct Worker {
     /// policy refuses) stays off until the user asks again (Receive calls
     /// switched, Add contact opened, Bluetooth back on); no background retry.
     listen_latched: bool,
+    /// The last announcement start failed because Windows Bluetooth stopped
+    /// answering (`Error::NotResponding`); the UI says "Bluetooth unavailable".
+    listen_stuck: bool,
     /// "Block unknown callers" (CF-CALL-24, default off).
     block_unknown: bool,
     /// A blocked caller being declined silently (a call state: busy).
@@ -1038,6 +1195,11 @@ struct Worker {
 }
 
 impl Worker {
+    /// W4 combines this with the Settings switch.
+    fn wifi_armed(&self) -> bool {
+        meshlive::wifi::env_arm()
+    }
+
     /// Live (Watch and Go live) runs only where Windows and the adapter can
     /// (24H2 extended advertising, peripheral and central roles, the
     /// announcement policy); the Live page says why when they can't.
@@ -1054,7 +1216,7 @@ impl Worker {
         self.send(Update::WatchAvailable(ready));
     }
 
-    fn start_watch(&mut self, id: Handle) {
+    fn start_watch(&mut self, id: Handle, watch: u64) {
         self.finish_presence_task();
         let selected = self.stream_offers.best(id, self.watch_mask).cloned();
         let allowed = meshlive::stream_watch::enabled() && !self.radio_off && self.call.is_none()
@@ -1069,7 +1231,7 @@ impl Worker {
         self.stop_scan();
         if let Some(listen) = self.listen.take() { listen.stop(&mut |p, d| trace(p, d)); }
         self.set_visible(false, Some("Calls are paused while watching.".into()));
-        self.watching = Some(crate::stream_backend::Task::watch(dir, selected, self.outbox.clone()));
+        self.watching = Some(crate::stream_backend::Task::watch(dir, selected, self.outbox.clone(), self.hidden_streams.clone(), watch));
     }
 
     fn start_source(&mut self, kind: crate::ui::model::LiveKind, title: String, initial: meshlive::stream_source::InitialMedia) {
@@ -1091,6 +1253,14 @@ impl Worker {
         if let Some(stores) = self.stores.as_ref() { self.stores = Some(Stores::open(&stores.dir)); }
         self.maintained_epoch = None;
         self.listen_retry_at = None;
+    }
+    /// The blocked fingerprints for the Live filter, read once and again
+    /// after a change (`Command::BlocksChanged`); an unreadable list hides nothing.
+    fn blocked_list(&mut self) -> Vec<[u8; 32]> {
+        if self.blocked_cache.is_none() {
+            self.blocked_cache = Some(self.stores.as_ref().and_then(|s| s.blocks.list().ok()).unwrap_or_default());
+        }
+        self.blocked_cache.clone().unwrap_or_default()
     }
 
     fn new(inbox: Receiver<Job>, outbox: Sender<Update>, busy: Arc<AtomicBool>, stores: Option<Stores>) -> Self {
@@ -1116,6 +1286,8 @@ impl Worker {
             call: None,
             pending_dial: None,
             watching: None,
+            hidden_streams: Default::default(),
+            blocked_cache: None,
             source: None,
             source_settings: Default::default(),
             source_consent: false,
@@ -1134,10 +1306,10 @@ impl Worker {
             contact_cadence: Default::default(),
             listen: None,
             receive_calls: true,
-            ringback: true,
             radio_off: false,
             listen_retry_at: None,
             listen_latched: false,
+            listen_stuck: false,
             block_unknown: {
                 #[cfg(feature = "test-hooks")]
                 {
@@ -1194,8 +1366,16 @@ impl Worker {
                         self.stop_scan();
                     }
                     if self.call.is_some() {
-                        self.end_local(|s| s.hang_up(Reason::Error));
-                        self.send(Update::CallSetupFailed("Call ended: Bluetooth was turned off".into()));
+                        let keeps = self
+                            .call
+                            .as_mut()
+                            .is_some_and(|call| call.dialed.mark_bt_dead());
+                        if keeps {
+                            trace("carrier_lost", "carrier=BLUETOOTH | reason=radio_off | live=1");
+                        } else {
+                            self.end_local(|s| s.hang_up(Reason::Error));
+                            self.send(Update::CallSetupFailed("Call ended: Bluetooth was turned off".into()));
+                        }
                     }
                     let note = if self.epoch.crash_loop(now) { CRASH_LOOP_GUIDANCE } else { "Turn Bluetooth on in Windows settings to find people and call." };
                     self.send(Update::BluetoothNote(Some(note.into())));
@@ -1220,6 +1400,7 @@ impl Worker {
     fn run(mut self) {
         if let Some(stores) = self.stores.as_mut() {
             stores.reconcile();
+            stores.reconcile_blocked();
         }
         if self.stores.is_some() {
             match meshlive::bluetooth::radio_watch::RadioWatch::start() {
@@ -1272,8 +1453,35 @@ impl Worker {
                 if visible { self.scan_restart_at = Some(Instant::now()); }
                 else if !self.people_visible { self.stop_scan(); }
             }
-            Job::Ui(Command::Watch(id)) => self.start_watch(id),
+            Job::Ui(Command::Watch { id, watch }) => self.start_watch(id, watch),
             Job::Ui(Command::StopWatching) => { self.watching = None; self.reload_stream_stores(); },
+            Job::Ui(Command::HideWatchedStream { source, route }) => {
+                // "Block this person": this route stays hidden (Android
+                // `PersonPolicy.hideStream`), also under a rotating ID nobody
+                // recognises, until that person is unblocked. The route is
+                // the one this PC authenticated, not the tapped row.
+                self.hidden_streams.lock().unwrap_or_else(|e| e.into_inner()).hide(route, source);
+            }
+            Job::Ui(Command::BlocksChanged) => {
+                // The contact layer saved a block, unblock or reset and its
+                // presence revocation: reopen the stores (the vault's new
+                // generation), read the list again for Live, and bring back
+                // the hidden routes of people no longer blocked.
+                self.finish_presence_task();
+                self.blocked_cache = None;
+                self.reload_stream_stores();
+                // One writer: the worker's vault revokes a lease the blocked
+                // contact holds (Android `revokeForBlocked`); a block made now
+                // fails closed.
+                if let Some(stores) = self.stores.as_mut() {
+                    let revoked = stores.revoke_blocked(true);
+                    if revoked > 0 {
+                        trace("presence_revoked", &format!("reason=blocked revoked={revoked}"));
+                    }
+                }
+                let blocked = self.blocked_list();
+                self.hidden_streams.lock().unwrap_or_else(|e| e.into_inner()).retain_sources(|node| meshlive::blocking::node_blocked(&blocked, node));
+            }
             Job::Ui(Command::MuteWatch(muted)) => if let Some(task) = self.watching.as_ref() { task.mute(muted); },
             Job::Ui(Command::ConfigureLive(settings)) => if self.source.is_none() && settings.valid() { self.source_settings = settings; },
             Job::Ui(Command::LiveExposureConsent) => self.source_consent = meshlive::stream_source::enabled(),
@@ -1297,6 +1505,18 @@ impl Worker {
                 }
             }
             Job::Ui(Command::CallSignal(message)) => self.on_ui_signal(message),
+            Job::Ui(Command::SwitchCamera) => {
+                if let Some(camera) = self.call.as_ref().and_then(|call| call.camera.as_ref()) {
+                    camera.switch_camera();
+                } else if let Some(task) = self.source.as_ref() {
+                    task.control(crate::source_backend::Control::Flip);
+                }
+            }
+            Job::Ui(Command::CallOutput(endpoint)) => {
+                if let Some(call) = self.call.as_ref() {
+                    call.audio.set_output(endpoint);
+                }
+            }
             Job::Dial {
                 person,
                 voice,
@@ -1327,7 +1547,6 @@ impl Worker {
             }
             Job::Ui(Command::Switches(switches)) => {
                 self.receive_calls = switches.receive_calls;
-                self.ringback = switches.ringback;
                 self.block_unknown = switches.block_unknown;
                 // Test-only: "Block unknown callers" for this run only (never saved).
                 #[cfg(feature = "test-hooks")]
@@ -1339,13 +1558,20 @@ impl Worker {
             }
             Job::Ui(Command::ShowOwnCode) => self.open_visit(),
             Job::Ui(Command::ResetPresenceKey) => {
-                let reset = self.stores.as_mut().is_some_and(|s| s.vault.reset_damaged());
-                trace("presence_reset", &format!("deleted={reset}"));
+                // A presence exchange in a call holds the stores; it hands them back first.
+                self.finish_presence_task();
+                let reset = self.stores.as_mut().is_some_and(|s| {
+                    let epoch = s.epoch();
+                    s.vault.reset_key(epoch)
+                });
+                trace("presence_reset", &format!("reset={reset}"));
                 if reset {
-                    // The announcement tries again with a new generation.
+                    // A latched announcement tries again; a running one moves
+                    // to the new ID on its next poll (`own_offer`).
                     self.listen_retry_at = None;
                     self.listen_latched = false;
                 }
+                self.send(Update::PrivateIdReset(reset));
             }
             Job::Ui(Command::Wipe) => {
                 // CF-PRIV-26: end everything and write nothing more.
@@ -1370,6 +1596,8 @@ impl Worker {
                 self.stop_scan();
                 self.receive_calls = false;
                 self.stores = None;
+                self.blocked_cache = None;
+                self.hidden_streams.lock().unwrap_or_else(|e| e.into_inner()).clear();
             }
             // Remaining commands belong to the other backend decorators.
             Job::Ui(_) | Job::Quit => {}
@@ -1468,7 +1696,11 @@ impl Worker {
         let mut changed = false;
         if self.streams_visible {
             self.stream_offers.prune(Instant::now());
-            let rows = self.stream_offers.rows(self.watch_mask).into_iter().map(|(id, s)| {
+            // Android `hideBlockedStreams`: blocked people's streams leave Live.
+            let blocked = self.blocked_list();
+            let hidden = self.hidden_streams.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let stores = &mut self.stores;
+            let rows = self.stream_offers.visible_rows(self.watch_mask, &hidden, |a| stream_source_blocked(a, &blocked, stores)).into_iter().map(|(id, s)| {
                 let a = &s.announcement;
                 crate::ui::model::StreamEntry { id, from: own_generated_name(&a.prefix).unwrap_or_default(), title: None,
                     audio_only: a.summary == 0x40, reach: if a.cost == 0 { Reach::Direct } else { Reach::Via(a.cost) },
@@ -1872,7 +2104,8 @@ impl Worker {
                     mic_frames: 0,
                     mic_muted: false,
                     capture_fence: call_capture_fence(),
-                    ringback: self.ringback,
+                    // The ringing tone has no switch (Android 2026-10-17).
+                    ringback: true,
                     ringing_at: None,
                     peer_header: false,
                     active_shown: false,
@@ -1898,11 +2131,19 @@ impl Worker {
             presence_task: None,
             presence_answered: false,
             link_traced: None,
+            renewal: Default::default(),
+            tx_watch: Default::default(),
                 });
+                let armed = self.wifi_armed();
+                if let Some(call) = self.call.as_mut() {
+                    call.dialed.wifi_arm(armed);
+                }
                 self.send(Update::CallStatus(None));
                 // A real-key peer is judged now; a pseudonym at its REVEAL.
+                reveal_screen_trace(self.stores.is_some());
                 if let (Some(call), Some(stores)) = (self.call.as_mut(), self.stores.as_mut()) {
-                    if let Some((node, fingerprint)) = call.dialed.peer_real {
+                    // WP6: no presence for a blocked peer (screened in the dial).
+                    if let Some((node, fingerprint)) = call.dialed.peer_real.filter(|_| !call.dialed.session.peer_blocked()) {
                         for record in call.presence.identified(node, fingerprint, &mut stores.hooks()) {
                             call.dialed.session.send_discovery(record);
                         }
@@ -1962,11 +2203,14 @@ impl Worker {
             // The user answered: the session sends Accept (after this PC's
             // REVEAL in a call it answered with its throwaway).
             let voice = call.dialed.session.voice_offer();
-            match call.dialed.session.accept(voice) {
+            // WP6NG finding 1: on the call clock, so a block found now counts from now.
+            match call.dialed.session.accept_at(voice, call.dialed.start.elapsed().as_nanos() as u64) {
                 Ok(notices) => {
                     trace("accepted", &format!("voice={voice} ring_ms={}", call.placed.elapsed().as_millis()));
                     for notice in notices {
-                        if let Notice::StartMedia { camera } = notice {
+                        if let Notice::StartMedia { camera } = notice
+                            && owner_may_start_media(&mut call.dialed.session, call.dialed.start.elapsed().as_nanos() as u64, &notice)
+                        {
                             if call.start_media(camera) && call.peer_header && !call.active_shown {
                                 call.active_shown = true;
                                 let _ = self.outbox.send(Update::CallMediaReady);
@@ -2021,7 +2265,10 @@ impl Worker {
     fn tick_silent(&mut self) {
         let Some(silent) = self.silent.as_mut() else { return };
         let mut done = false;
-        if silent.dialed.flush().is_err() {
+        // WP6NF finding 3: a declined caller on the block list is latched in
+        // its session: its writes are bounded, and past the hard local
+        // deadline it is dropped whatever the link does.
+        if silent.dialed.session.blocked_overdue(silent.dialed.now_ns()) || silent.dialed.flush().is_err() {
             done = true;
         }
         if let Some(at) = silent.closing {
@@ -2085,18 +2332,43 @@ impl Worker {
         let mut updates = Vec::new();
         let mut lost = false;
         let mut ended = false;
-        if let Err(error) = call.dialed.flush() {
-            // The liveness close: say whether the Hang-up/Error went out first.
-            if call.dialed.session.liveness_hung_up() {
-                trace("liveness_hang_up", "written=true");
-            }
-            trace("write_failed", &error.to_string());
-            lost = true;
-        }
-        if !lost {
-            if let Err(error) = call.dialed.link.service() {
-                trace("write_failed", &format!("gatt_recovery {error}"));
+        // Design SR (MESHLIVE_CALL_RENEWAL, off by default): a stalled direct GATT
+        // call replaces its hop link. Nothing here runs without a negotiated key.
+        if call.dialed.session.renewal_negotiated() {
+            if let Some(reason) = call.renewal.step(&mut call.dialed, call.want_video, &mut |p, d| trace(p, d)) {
+                trace("call_renewal", &format!("role=supervisor | phase=link_dead | reason={reason}"));
                 lost = true;
+            }
+        }
+        // WP6NF finding 1: past the hard local deadline nothing more is
+        // written; the blocked end below closes the call.
+        let overdue = call.dialed.session.blocked_overdue(call.dialed.now_ns());
+        if !overdue && let Err(error) = call.dialed.flush() {
+            if call.dialed.session.renewal_running() {
+                // Design SR: a renewal owns the call's liveness; a failing old link is part of it.
+                call.renewal.note_old_link_failed(&mut call.dialed, "write", &mut |p, d| trace(p, d));
+            } else {
+                // The liveness close: say whether the Hang-up/Error went out first.
+                if call.dialed.session.liveness_hung_up() {
+                    trace("liveness_hang_up", "written=true");
+                }
+                trace("write_failed", &error.to_string());
+                lost = true;
+            }
+        }
+        // Wi-Fi path traces (`bwf1_ignored`, `marker_unknown_ticket`, `close_ignored`); none without Wi-Fi.
+        for (phase, line) in call.dialed.session.wifi_take_traces() {
+            trace(phase, &line);
+        }
+        // WP6NG finding 3: past the hard local deadline no further I/O.
+        if !lost && !overdue {
+            if let Err(error) = call.dialed.service_bt() {
+                if call.dialed.session.renewal_running() {
+                    call.renewal.note_old_link_failed(&mut call.dialed, "service", &mut |p, d| trace(p, d));
+                } else {
+                    trace("write_failed", &format!("gatt_recovery {error}"));
+                    lost = true;
+                }
             }
         }
         // A pseudonym<->pseudonym caller that did not reveal in time: the
@@ -2107,14 +2379,34 @@ impl Worker {
             updates.push(Update::CallEnded { reason: crate::ui::backend::CallEndReason::Unconfirmed });
             updates.push(Update::CallLinkLost);
         }
-        call.dialed.link.drain_events(&mut |p, d| trace(p, d));
-        call.dialed.link.recheck_preset(&mut |p, d| trace(p, d));
-        // As peripheral the phone sets the link: trace what Windows reports
-        // every 5 s while media runs (diagnosis of PC -> phone loss).
-        if call.media && call.link_traced.is_none_or(|at| at.elapsed() >= Duration::from_secs(5)) {
-            call.link_traced = Some(Instant::now());
-            if let Some(state) = call.dialed.link.link_state() {
-                trace("le_link", &state);
+        // WP6: a blocked peer: the session wrote the ordinary end after its
+        // delay, or the hard local deadline passed (writes stalled); the call
+        // ends here either way (nothing on the wire says "blocked").
+        let now_ns = call.dialed.now_ns();
+        // WP6NG finding 2: closed on the end's real outcome (written, or
+        // nothing could be queued) or at the hard deadline.
+        let end_state = call.dialed.session.blocked_end_state();
+        let settled = matches!(
+            end_state,
+            Some(meshlive::call_session::BlockedEndState::Written | meshlive::call_session::BlockedEndState::Unsendable)
+        );
+        if (settled || call.dialed.session.blocked_overdue(now_ns)) && call.closing.is_none() {
+            trace("call_blocking", &format!("event=ended reason=blocked_person end_state={end_state:?}"));
+            call.closing = Some(Instant::now());
+            call.stop_media();
+            updates.push(Update::CallEnded { reason: crate::ui::backend::CallEndReason::BlockedPerson });
+            updates.push(Update::CallLinkLost);
+        }
+        if !call.dialed.wifi.bt_dead {
+            call.dialed.link.drain_events(&mut |p, d| trace(p, d));
+            call.dialed.link.recheck_preset(&mut |p, d| trace(p, d));
+            // As peripheral the phone sets the link: trace what Windows reports
+            // every 5 s while media runs (diagnosis of PC -> phone loss).
+            if call.media && call.link_traced.is_none_or(|at| at.elapsed() >= Duration::from_secs(5)) {
+                call.link_traced = Some(Instant::now());
+                if let Some(state) = call.dialed.link.link_state() {
+                    trace("le_link", &state);
+                }
             }
         }
         if !lost && call.closing.is_none() {
@@ -2199,6 +2491,14 @@ impl Worker {
                                 ),
                             );
                         }
+                        // WP6: the owner's own check: nothing of this PC's
+                        // starts and no media is shown for a blocked peer.
+                        if matches!(notice, Notice::StartMedia { .. } | Notice::PeerHeader(_))
+                            && !owner_may_start_media(&mut call.dialed.session, call.dialed.start.elapsed().as_nanos() as u64, &notice)
+                        {
+                            trace("call_blocking", "event=media_refused");
+                            continue;
+                        }
                         match notice {
                             Notice::StartMedia { camera } => {
                                 if call.start_media(camera) && call.peer_header && !call.active_shown {
@@ -2262,7 +2562,20 @@ impl Worker {
                             }
                             Notice::Ended(_) => { ended = true; call.stop_media(); }
                             Notice::PeerRotation(turns) => call.pictures.set_turns(turns),
+                            Notice::PeerBlocked => {
+                                // WP6: nothing of this PC's starts (the session holds it);
+                                // the ringing tone stops while the end is on its way.
+                                trace("call_blocking", "event=peer_blocked");
+                                call.audio.ringback(false);
+                                call.stop_media();
+                            }
                             Notice::PeerLabel { kind: meshlive::labels::KIND_NAME, text } => {
+                                // Naming v2: a name signed by the peer's authenticated
+                                // real key; the contact layer keeps it only for a
+                                // verified contact (a pseudonymous peer has none).
+                                if let Some((_, fingerprint)) = call.dialed.peer_real {
+                                    updates.push(Update::PeerClaimedName { fingerprint, name: text.clone() });
+                                }
                                 updates.push(Update::CallPeerName(text));
                             }
                             _ => {}
@@ -2275,7 +2588,11 @@ impl Worker {
                     for message in call.dialed.session.take_remote() {
                         updates.push(Update::CallSignal(message));
                     }
-                    lost = true;
+                    if call.dialed.session.renewal_running() {
+                        call.renewal.note_old_link_failed(&mut call.dialed, "read", &mut |p, d| trace(p, d));
+                    } else {
+                        lost = true;
+                    }
                 }
             }
             stage[0] = tick_started.elapsed();
@@ -2344,11 +2661,38 @@ impl Worker {
                     }
                 }
             }
+            if call.media {
+                // The send side against the peer's delivery reports: counters
+                // every 10 s, and once when the peer stops receiving while it
+                // keeps reporting (a phone stack that dropped this PC's writes).
+                let now = call.dialed.now_ns();
+                let delivery = call.dialed.session.delivery();
+                let (written, received, reports) = (delivery.written(), delivery.received(), delivery.reports());
+                match call.tx_watch.tick(now, written, received, reports) {
+                    Some(meshlive::call_rate::TxEvent::Stalled { quiet_ms, written_since, reports_since }) => trace(
+                        "peer_rx_stalled",
+                        &format!("quiet_ms={quiet_ms} written_since={written_since} reports_since={reports_since} pc_bluetooth_not_responding={}", self.listen_stuck),
+                    ),
+                    Some(meshlive::call_rate::TxEvent::Resumed { stalled_ms }) => trace("peer_rx_resumed", &format!("stalled_ms={stalled_ms}")),
+                    None => {}
+                }
+                if call.tx_watch.line_due(now) {
+                    let stats = call.dialed.session.stats();
+                    trace(
+                        "call_tx",
+                        &format!(
+                            "written_bytes={written} peer_received_bytes={received} peer_reports={reports} audio_sent={} video_sent={} audio_queued={} video_queued={}",
+                            stats.audio_sent, stats.video_sent, stats.audio_queued, stats.video_queued
+                        ),
+                    );
+                }
+            }
             // The camera's state for the call screen; an unusable camera turns video off.
             let camera_events = call.camera.as_ref().map(|c| c.events()).unwrap_or_default();
             for event in camera_events {
                 match event {
                     meshlive::call_camera::Event::On => updates.push(Update::CallCamera(None)),
+                    meshlive::call_camera::Event::Cameras(count) => updates.push(Update::Cameras(count)),
                     meshlive::call_camera::Event::Unavailable(reason) => {
                         trace("camera_unavailable", &reason);
                         call.video = None;
@@ -2370,9 +2714,14 @@ impl Worker {
             }
             stage[2] = tick_started.elapsed();
             updates.extend(call.pump_audio(now));
-            let timeout = (!call.media).then(|| ring_timeout(
-                call.dialed.session.phase(), call.placed.elapsed(), call.ringing_at.map(|at| at.elapsed()),
-            )).flatten();
+            // WP6NG finding 8: a blocked person's delayed end owns the end.
+            let timeout = owner_ring_timeout(
+                &mut call.dialed.session,
+                call.dialed.start.elapsed().as_nanos() as u64,
+                call.media,
+                call.placed.elapsed(),
+                call.ringing_at.map(|at| at.elapsed()),
+            );
             if call.incoming
                 && timeout == Some(Signal::Decline)
                 && call.dialed.session.decline(Reason::Rejected).is_ok()
@@ -2390,6 +2739,39 @@ impl Worker {
                 call.closing = Some(Instant::now());
                 updates.push(Update::CallEnded { reason: crate::ui::backend::CallEndReason::NoAnswer });
                 updates.push(Update::CallLinkLost);
+            }
+        }
+        if !lost && call.closing.is_none() {
+            if let Some(label) = call.dialed.wifi_tick(&mut |p, d| trace(p, d)) {
+                let (effective, reason) = if label == "Wi-Fi" {
+                    ("direct", "switch")
+                } else {
+                    ("bluetooth", "fallback")
+                };
+                trace(
+                    "carrier",
+                    &format!(
+                        "hop=call | requested=direct | effective={effective} | reason={reason}"
+                    ),
+                );
+            }
+        } else if !lost {
+            call.dialed.wifi_service();
+        } else {
+            call.dialed.wifi_release();
+        }
+        // WP6NF finding 8: a call with a blocked person that ends any other way
+        // (the peer's end, a lost link) still says why.
+        if (ended || lost) && call.closing.is_none() && call.dialed.session.peer_blocked() {
+            updates.push(Update::CallEnded { reason: crate::ui::backend::CallEndReason::BlockedPerson });
+        }
+        // The phone stopped receiving this PC while Windows Bluetooth here was
+        // not responding (2026-11: a Samsung phone gives up this PC's writes when
+        // the PC's stack leaves its GATT request unanswered for 30 s): say why.
+        if (ended || lost) && call.closing.is_none() && !call.dialed.session.peer_blocked() {
+            if let Some(reason) = stalled_call_end(call.tx_watch.ever_stalled(), self.listen_stuck) {
+                trace("call_end_reason", "pc_bluetooth_not_responding");
+                updates.push(Update::CallEnded { reason });
             }
         }
         if ended && call.closing.is_none() {
@@ -2448,6 +2830,13 @@ impl Worker {
             self.send(Update::OwnGeneratedName(name));
         }
     }
+    /// Windows Bluetooth stopped (or resumed) answering an announcement start.
+    fn set_stuck(&mut self, stuck: bool) {
+        if self.listen_stuck != stuck {
+            self.listen_stuck = stuck;
+            self.send(Update::BluetoothNotResponding(stuck));
+        }
+    }
     fn set_visible(&mut self, visible: bool, note: Option<String>) {
         if !visible {
             self.set_own_name(None);
@@ -2499,6 +2888,12 @@ impl Worker {
             return;
         }
         if self.listen.is_none() {
+            if self.listen_stuck && self.listen_latched && !meshlive::bluetooth::peripheral::start_pending() {
+                // Windows answered the start that outlived its wait (e.g.
+                // Bluetooth was turned off and on): one more try.
+                trace("announce_unstuck", "");
+                self.listen_latched = false;
+            }
             if self.listen_latched || self.listen_retry_at.is_some_and(|at| Instant::now() < at) {
                 return;
             }
@@ -2522,6 +2917,7 @@ impl Worker {
                     trace("announce_keys", if persistent { "persistent" } else { "ephemeral" });
                     self.set_own_name(Some(listen.rdi));
                     self.listen = Some(listen);
+                    self.set_stuck(false);
                     self.send(Update::AdvertisingProof(Ok(())));
                     let note = self.presence_note();
                     self.set_visible(true, note);
@@ -2531,6 +2927,15 @@ impl Worker {
                     // again later without latching (it may close).
                     trace("announce_failed", "announced_elsewhere");
                     self.listen_retry_at = Some(Instant::now() + Duration::from_secs(30));
+                    self.set_visible(false, Some(text));
+                }
+                Err((Some(meshlive::bluetooth::Error::NotResponding), text)) => {
+                    // A Windows call never returned (2026-11-06): proves
+                    // nothing about the adapter, so no AdvertisingProof.
+                    trace("announce_failed", &format!("NotResponding stuck_at={} limit_ms={}", meshlive::bluetooth::peripheral::current_step(), meshlive::bluetooth::peripheral::START_CALL_LIMIT.as_millis()));
+                    self.listen_latched = true;
+                    trace("announce_latched", "reason=not_responding");
+                    self.set_stuck(true);
                     self.set_visible(false, Some(text));
                 }
                 Err((error, text)) => {
@@ -2559,7 +2964,13 @@ impl Worker {
             Poll::Client => self.answer(listen),
             Poll::Failed(text) => {
                 listen.stop(&mut |p, d| trace(p, d));
-                if text == meshlive::callee::DROPPED_TOO_OFTEN {
+                if text == meshlive::bluetooth::radio_watch::RESTART_GUIDANCE {
+                    // A restart at the ID change hit a Windows call that
+                    // never returned: wait for Windows or the user.
+                    self.listen_latched = true;
+                    trace("announce_latched", "reason=not_responding");
+                    self.set_stuck(true);
+                } else if text == meshlive::callee::DROPPED_TOO_OFTEN {
                     // Windows keeps stopping the announcement: a Bluetooth
                     // restart is what helps (shown with Open Bluetooth settings).
                     self.send(Update::BluetoothNote(Some(meshlive::bluetooth::radio_watch::RESTART_GUIDANCE.into())));
@@ -2639,6 +3050,11 @@ impl Worker {
             self.send(Update::CallSearchSuperseded);
         }
         trace("incoming_ring", &format!("call_id={} verified={}", hex(&answer.invite.call_id), answer.verified));
+        // Naming v2: a real-key caller's signed name from before its Invite;
+        // the contact layer keeps it only for a verified contact.
+        if let (true, Some(name)) = (answer.verified, answer.peer_name.clone()) {
+            self.send(Update::PeerClaimedName { fingerprint: answer.peer_fingerprint, name });
+        }
         let label_name = answer.peer_name.clone();
         let peer_name = if answer.verified {
             self.stores
@@ -2680,9 +3096,17 @@ impl Worker {
             presence_task: None,
             presence_answered: false,
             link_traced: None,
+            renewal: Default::default(),
+            tx_watch: Default::default(),
         });
+        let armed = self.wifi_armed();
+        if let Some(call) = self.call.as_mut() {
+            call.dialed.wifi_arm(armed);
+        }
+        reveal_screen_trace(self.stores.is_some());
         if let (Some(call), Some(stores)) = (self.call.as_mut(), self.stores.as_mut()) {
-            if let Some((node, fingerprint)) = call.dialed.peer_real {
+            // WP6: no presence for a blocked peer.
+            if let Some((node, fingerprint)) = call.dialed.peer_real.filter(|_| !call.dialed.session.peer_blocked()) {
                 for record in call.presence.identified(node, fingerprint, &mut stores.hooks()) {
                     call.dialed.session.send_discovery(record);
                 }
@@ -2691,16 +3115,16 @@ impl Worker {
         self.set_visible(false, None);
         let fingerprint = answer.verified.then_some(answer.peer_fingerprint);
         // CF-CALL-25: the ring (the quiet ringing tone, never above the user's
-        // volume) unless switched off or Windows is in do-not-disturb or
+        // volume) unless Windows is in do-not-disturb or
         // presenting; it stops at Accept (start_media), Decline or the end.
         let attention = crate::notify::attention();
-        if self.ringback && crate::notify::ring_allowed(attention) {
+        if crate::notify::ring_allowed(attention) {
             if let Some(call) = self.call.as_mut() {
                 call.audio.ringback(true);
             }
             trace("incoming_ring_sound", &format!("on attention={attention:?}"));
         } else {
-            trace("incoming_ring_sound", &format!("off switch={} attention={attention:?}", self.ringback));
+            trace("incoming_ring_sound", &format!("off attention={attention:?}"));
         }
         let generated = answer
             .peer_throwaway
@@ -2709,7 +3133,7 @@ impl Worker {
             .map(|n| n.name);
         self.send(Update::IncomingCall { peer: peer_name, verified: answer.verified, invite, fingerprint });
         // A stranger without a name label: the made-up name of its throwaway
-        // key, as Android shows it (the UI uses it while Friendly names is on).
+        // key, as Android shows it (friendly names are always on).
         if let Some(name) = generated {
             self.send(Update::CallPeerGenerated(name));
         }
@@ -2738,6 +3162,10 @@ impl Worker {
         let _ = node;
         self.visit = Some(Visit::new(fingerprint));
         self.listen_retry_at = None;
+        if self.listen_stuck {
+            // Opening Add contact again is the user's retry.
+            self.listen_latched = false;
+        }
         trace("code_visit_start", "");
     }
     /// Keeps the shown code on the RDI on air (a new code after it changed,
@@ -2794,7 +3222,7 @@ impl Worker {
         } else if visit.reuse_alert {
             format!("{name} scanned your code. Nothing more is shared on this visit.")
         } else {
-            format!("{name} scanned your code. Now scan theirs (above), so you can find each other.")
+            format!("{name} scanned your code. Now scan their code.")
         };
         self.send(Update::CodeScanned(text));
         let (session, buffer) = verify_scan::ScanSession::displayer(reached, 0, answering);
@@ -2973,6 +3401,18 @@ mod tests {
     //! Offline only: nothing here searches or dials (no Rescan, no known person).
     use super::*;
 
+    /// 2026-11 Windows -> S22: the phone stopped receiving while Windows here
+    /// never answered an advertising start. Only both together name this PC's
+    /// Bluetooth; a stall alone, or a stuck stack on a healthy call, does not.
+    #[test]
+    fn a_call_the_phone_stopped_receiving_names_this_pcs_bluetooth_only_when_windows_stopped_answering() {
+        use crate::ui::backend::CallEndReason;
+        assert_eq!(stalled_call_end(true, true), Some(CallEndReason::PcBluetoothNotResponding));
+        assert_eq!(stalled_call_end(true, false), None, "a phone that stopped receiving for its own reasons");
+        assert_eq!(stalled_call_end(false, true), None, "a call that kept working on a stuck stack (a phone that never asked)");
+        assert_eq!(stalled_call_end(false, false), None);
+    }
+
     #[test]
     fn setup_timing_flow_retains_stage_times_without_free_form_details() {
         let private = "PRIVATE-CONTENT\nphase=forged";
@@ -2986,6 +3426,110 @@ mod tests {
         assert!(!output.contains("PRIVATE-CONTENT") && !output.contains("forged") && !output.contains("mic_probe"));
         assert!(trace_line(1_800, private, "", true).is_none(), "unknown or injected stage names are omitted");
         assert!(trace_line(1_800, "mic_probe", private, false).unwrap().contains(private), "the original opt-in trace arm is retained");
+    }
+
+    /// A fixed stream offer is attributed by its 48-bit prefix; a rotating one
+    /// needs a recognised contact (no stores: nobody); an empty list hides nothing.
+    #[test]
+    fn a_fixed_stream_offer_is_attributed_by_its_prefix_and_nothing_is_hidden_without_blocks() {
+        let mut a = meshlive::discovery::Announcement {
+            version: 4, prefix: [9; 6], flags: meshlive::discovery::STREAM, summary: 1, token: 1, cost: 0,
+            sequence: 0, width: 0, height: 0, fps: 0, bitrate: 0, recovery: None,
+        };
+        let mut none: Option<Stores> = None;
+        assert!(stream_source_blocked(&a, &[[9; 32]], &mut none));
+        assert!(!stream_source_blocked(&a, &[], &mut none));
+        a.version = 5;
+        assert!(!stream_source_blocked(&a, &[[9; 32]], &mut none), "a rotating offer needs a recognised contact");
+    }
+
+    /// WP6/WP6NF finding 4: the owner's media gate reads the call's newest
+    /// policy: a peer blocked while it rang (no write or input in between)
+    /// starts no capture and shows no media, and Accept starts nothing.
+    #[test]
+    fn the_owner_never_starts_media_or_shows_it_for_a_blocked_peer() {
+        use meshlive::call_policy::{CallPolicy, Snapshot};
+        let header = meshlive::media::VideoHeader { width: 426, height: 240, fps: 15, codec: 2, quarter_turns: 0, opus: true };
+        let link = meshlive::call::CallLink::new(&[1; 32], &[2; 32], &[3; 32], &[4; 32], false).unwrap();
+        let invite = meshlive::call::Message::simple([7; 16], Signal::Invite).unwrap();
+        let (mut session, _) = meshlive::call_session::CallSession::<meshlive::opus::Decoder>::incoming(
+            link,
+            &invite,
+            header,
+            |c| meshlive::opus::Decoder::new(c, meshlive::opus::Profile::StreamOrCall),
+            0,
+        )
+        .unwrap();
+        let policy = std::sync::Arc::new(CallPolicy::new(Snapshot { generation: 0, audience: None, blocked: Some(Vec::new()), contacts: None }));
+        session.use_policy(policy.clone());
+        let peer = [0x4eu8; 32];
+        session.screen_peer(peer, 0);
+        for notice in [Notice::StartMedia { camera: true }, Notice::PeerHeader(header)] {
+            assert!(owner_may_start_media(&mut session, 0, &notice), "{notice:?}");
+        }
+        policy.set_blocked(Some(vec![peer]));
+        for notice in [Notice::StartMedia { camera: true }, Notice::PeerHeader(header)] {
+            assert!(!owner_may_start_media(&mut session, 0, &notice), "{notice:?}");
+        }
+        assert!(!owner_may_start_media(&mut session, 0, &Notice::PeerBlocked));
+        assert!(session.accept(false).unwrap().iter().all(|n| !matches!(n, Notice::StartMedia { .. })), "Accept starts nothing");
+    }
+
+    /// WP6NG finding 8: once the peer is blocked, the ordinary ring and
+    /// no-answer timeouts give way to its delayed end and outcome.
+    #[test]
+    fn a_blocked_peer_gets_no_ring_timeout_its_delayed_end_owns_the_call() {
+        use meshlive::call_policy::{CallPolicy, Snapshot};
+        let header = meshlive::media::VideoHeader { width: 426, height: 240, fps: 15, codec: 2, quarter_turns: 0, opus: true };
+        let link = meshlive::call::CallLink::new(&[1; 32], &[2; 32], &[3; 32], &[4; 32], false).unwrap();
+        let invite = meshlive::call::Message::simple([7; 16], Signal::Invite).unwrap();
+        let (mut session, _) = meshlive::call_session::CallSession::<meshlive::opus::Decoder>::incoming(
+            link,
+            &invite,
+            header,
+            |c| meshlive::opus::Decoder::new(c, meshlive::opus::Profile::StreamOrCall),
+            0,
+        )
+        .unwrap();
+        let policy = std::sync::Arc::new(CallPolicy::new(Snapshot { generation: 0, audience: None, blocked: Some(Vec::new()), contacts: None }));
+        session.use_policy(policy.clone());
+        let peer = [0x4fu8; 32];
+        session.screen_peer(peer, 0);
+        let long = Duration::from_secs(600);
+        assert_eq!(owner_ring_timeout(&mut session, 0, false, long, None), Some(Signal::Decline), "an ordinary unanswered call");
+        policy.set_blocked(Some(vec![peer]));
+        assert_eq!(owner_ring_timeout(&mut session, 0, false, long, None), None, "the blocked end owns it");
+    }
+
+    /// A block revokes through the worker's own vault (one writer): the new
+    /// generation it holds is the one saved, and a reload shows it.
+    #[test]
+    fn a_block_revokes_through_the_workers_vault_and_a_reload_keeps_its_generation() {
+        let n = meshlive::crypto::random_nonce().unwrap();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".artifacts/test-stores")
+            .join(format!("radio-blocked-{:02x}{:02x}", n[0], n[1]));
+        std::fs::create_dir_all(&dir).unwrap();
+        let epoch = dial::wall_epoch().unwrap_or(0);
+        let (node, fingerprint) = ([0xa1u8; 16], [0xa1u8; 32]);
+        {
+            let mut vault = meshlive::presence::Vault::open_default(&dir);
+            assert!(vault.ensure_loaded(epoch));
+            assert!(vault.deliver_lease(&node, epoch, || true).is_some());
+        }
+        let blocks = meshlive::blocking::BlockList::open_default(&dir);
+        assert_eq!(blocks.block(&fingerprint, meshlive::blocking::now_ms()), meshlive::blocking::BlockChange::Blocked);
+        let mut stores = Stores::open(&dir);
+        assert!(stores.revoke_blocked(true) > 0, "the worker's vault revoked the lease");
+        let generation = stores.vault.state().unwrap().generation;
+        assert!(!stores.vault.visible_to_them(&node));
+        drop(stores);
+        let mut reloaded = Stores::open(&dir);
+        let epoch = reloaded.epoch();
+        assert!(reloaded.vault.ensure_loaded(epoch));
+        assert_eq!(reloaded.vault.state().unwrap().generation, generation, "the worker's generation is the saved one");
+        assert!(!reloaded.vault.visible_to_them(&node));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -3005,6 +3549,33 @@ mod tests {
             backend.wipe_barrier();
             assert!(stopped.load(Ordering::Acquire)); assert!(!backend.watch_available);
         }
+    }
+
+    #[test]
+    fn turning_on_sample_people_never_waits_for_a_stuck_bluetooth_worker() {
+        let (jobs, inbox) = mpsc::channel::<Job>();
+        let (_outbox, updates) = mpsc::channel();
+        let (release, parked) = mpsc::channel::<()>();
+        let (stopped_tx, stopped) = mpsc::channel::<()>();
+        let worker = std::thread::spawn(move || {
+            // Stuck inside a Windows call (2026-11-06: StartAdvertising)...
+            let _ = parked.recv();
+            // ...then back in its loop, it reads Quit (or a closed inbox) and stops.
+            while let Ok(job) = inbox.recv() {
+                if matches!(job, Job::Quit) {
+                    break;
+                }
+            }
+            let _ = stopped_tx.send(());
+        });
+        let backend = RadioBackend { jobs, updates, worker: Some(worker), pending_id: None, dialing: None,
+            link_up: Arc::new(AtomicBool::new(false)), busy: Arc::new(AtomicBool::new(false)), local: Vec::new(), qr: None, watch_available: false };
+        let mut ui = crate::ui::Ui::with_backend(Box::new(backend));
+        let begun = Instant::now();
+        ui.set_demo(true);
+        assert!(begun.elapsed() < WORKER_STOP_WAIT + Duration::from_secs(1), "the window kept responding: {:?}", begun.elapsed());
+        release.send(()).unwrap();
+        assert!(stopped.recv_timeout(Duration::from_secs(5)).is_ok(), "the left worker still stops once Windows returns");
     }
 
     #[test]

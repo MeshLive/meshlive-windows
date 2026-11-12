@@ -14,6 +14,10 @@ pub const DISCARDABLE: u8 = 128;
 pub const PACKET_HEADER_BYTES: usize = 13;
 pub const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 const MAX_AUDIO_UNIT: usize = 16 * 1024;
+/// Most Opus units in one `BTA2` batch.
+pub const MAX_AUDIO_BATCH_UNITS: usize = 20;
+/// Largest timestamp span from a pair's or batch's first unit.
+pub const MAX_AUDIO_GAP_US: i64 = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -193,6 +197,44 @@ impl<'a> Packet<'a> {
         r.end()?;
         Ok(units)
     }
+}
+
+/// The inverse of `Packet::split_audio` (Android `pairAudioPackets` and
+/// `batchAudioPackets`): two ordinary Opus units as a `BTA1` pair, three to
+/// twenty as a `BTA2` batch, flags `AUDIO | AUDIO_BATCH` at the first unit's
+/// time. Every unit is ordinary audio (flags exactly `AUDIO`), at most 16 KiB,
+/// and 0 to 1 s after the first.
+pub fn pack_audio(units: &[Packet<'_>]) -> Result<Vec<u8>, Error> {
+    let first = units.first().ok_or(Error::Audio)?;
+    if !(2..=MAX_AUDIO_BATCH_UNITS).contains(&units.len())
+        || units.iter().any(|unit| unit.flags != AUDIO || unit.payload.len() > MAX_AUDIO_UNIT)
+    {
+        return Err(Error::Audio);
+    }
+    let mut deltas = Vec::with_capacity(units.len());
+    for unit in units {
+        let delta = unit.pts_us.checked_sub(first.pts_us).ok_or(Error::Timestamp)?;
+        if !(0..=MAX_AUDIO_GAP_US).contains(&delta) {
+            return Err(Error::Timestamp);
+        }
+        deltas.push(delta as i32);
+    }
+    let mut payload = Vec::with_capacity(5 + units.iter().map(|unit| 6 + unit.payload.len()).sum::<usize>());
+    if units.len() == 2 {
+        payload.extend_from_slice(b"BTA1");
+        payload.extend_from_slice(&deltas[1].to_be_bytes());
+    } else {
+        payload.extend_from_slice(b"BTA2");
+        payload.push(units.len() as u8);
+    }
+    for (unit, delta) in units.iter().zip(deltas) {
+        if units.len() > 2 {
+            payload.extend_from_slice(&delta.to_be_bytes());
+        }
+        payload.extend_from_slice(&(unit.payload.len() as u16).to_be_bytes());
+        payload.extend_from_slice(unit.payload);
+    }
+    Packet { flags: AUDIO | AUDIO_BATCH, pts_us: first.pts_us, payload: &payload }.encode()
 }
 
 /// Matches Android's bare OpusHead / Codec2 marker normalization. Marker tail
@@ -440,5 +482,37 @@ mod tests {
         assert_eq!(opus_head(&nested), Ok(head.as_slice()));
         config[15] = 0xff;
         assert!(opus_head(&config).is_err());
+    }
+
+    /// HEALTH-12: what the call writer packs is exactly what every receiver
+    /// splits (Android's `BTA1` pair and `BTA2` batch), unit for unit.
+    #[test]
+    fn packed_call_audio_splits_back_into_the_same_units_at_the_same_times() {
+        let bodies: Vec<Vec<u8>> = (0..MAX_AUDIO_BATCH_UNITS as u8).map(|i| vec![i; 3 + i as usize]).collect();
+        for count in 2..=MAX_AUDIO_BATCH_UNITS {
+            let units: Vec<Packet> = bodies[..count].iter().enumerate()
+                .map(|(i, body)| Packet { flags: AUDIO, pts_us: 5_000 + 20_000 * i as i64, payload: body }).collect();
+            let raw = pack_audio(&units).unwrap();
+            let packed = Packet::decode(&raw, MAX_PAYLOAD).unwrap();
+            assert_eq!(packed.flags, AUDIO | AUDIO_BATCH);
+            assert_eq!(packed.pts_us, 5_000);
+            assert_eq!(&packed.payload[..4], if count == 2 { b"BTA1" } else { b"BTA2" });
+            assert!(packed.split_audio().unwrap() == units, "{count} units");
+        }
+    }
+
+    #[test]
+    fn only_two_to_twenty_ordinary_units_within_one_second_are_packed() {
+        let unit = |flags, pts_us| Packet { flags, pts_us, payload: &[1, 2, 3] };
+        let run = |n: usize| (0..n).map(|i| unit(AUDIO, 20_000 * i as i64)).collect::<Vec<_>>();
+        assert!(pack_audio(&run(1)).is_err());
+        assert!(pack_audio(&run(MAX_AUDIO_BATCH_UNITS + 1)).is_err());
+        assert!(pack_audio(&[unit(AUDIO, 0), unit(AUDIO | CONFIG, 20_000)]).is_err(), "configuration is never packed");
+        assert!(pack_audio(&[unit(AUDIO, 0), unit(AUDIO | AUDIO_BATCH, 20_000)]).is_err(), "a packed record is never packed again");
+        assert!(pack_audio(&[unit(AUDIO, 20_000), unit(AUDIO, 0)]).is_err(), "never backwards in time");
+        assert!(pack_audio(&[unit(AUDIO, 0), unit(AUDIO, MAX_AUDIO_GAP_US + 1)]).is_err());
+        assert!(pack_audio(&[unit(AUDIO, 0), unit(AUDIO, MAX_AUDIO_GAP_US)]).is_ok());
+        let big = vec![0; MAX_AUDIO_UNIT + 1];
+        assert!(pack_audio(&[unit(AUDIO, 0), Packet { flags: AUDIO, pts_us: 20_000, payload: &big }]).is_err());
     }
 }

@@ -42,7 +42,11 @@ pub struct Policy {
     pub video_fragments: bool,
     pub labels: bool,
     pub discovery_exchange: bool,
+    /// Accept BME1 content type 12 (Design SR) on this reader.
+    pub renewal: bool,
     pub maximum_ciphertext: usize,
+    /// Accept BMS1 type 16 (`BWF1`) on this reader.
+    pub wifi: bool,
 }
 impl Default for Policy {
     fn default() -> Self {
@@ -52,7 +56,9 @@ impl Default for Policy {
             video_fragments: false,
             labels: false,
             discovery_exchange: false,
+            renewal: false,
             maximum_ciphertext: usize::MAX,
+            wifi: false,
         }
     }
 }
@@ -90,17 +96,25 @@ impl Header {
         if length < 16 || length > layer.maximum_ciphertext().min(policy.maximum_ciphertext) {
             return Err(Error::Size);
         }
+        if layer == Layer::Hop
+            && kind == 16
+            && !crate::wifi::wire::accepts_bwf1_ciphertext_length(length)
+        {
+            return Err(Error::Size);
+        }
         let known = match layer {
             Layer::Hop => {
                 (4..=10).contains(&kind)
                     || kind == 11 && policy.store_forward
                     || kind == 13 && policy.require_opening && sequence == 0
+                    || kind == 16 && policy.wifi
             }
             Layer::Endpoint => {
                 matches!(kind, 1 | 2 | 4 | 5 | 6 | 7 | 8)
                     || kind == 9 && policy.video_fragments
                     || kind == 10 && policy.labels
                     || kind == 11 && policy.discovery_exchange
+                    || kind == 12 && policy.renewal
             }
         };
         if !known {
@@ -161,6 +175,11 @@ impl Sealer {
     pub fn next_sequence(&self) -> u64 {
         self.next
     }
+    /// Design SR: allow BME1 content type 12 on this writer. Called only after
+    /// both endpoint hellos signed bit 4.
+    pub fn allow_renewal(&mut self) {
+        self.policy.renewal = true;
+    }
     pub fn seal(&mut self, kind: u8, flags: u8, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
         if self.cipher.is_none() {
             return Err(Error::Faulted);
@@ -219,6 +238,11 @@ impl Opener {
     }
     pub fn next_sequence(&self) -> u64 {
         self.next
+    }
+    /// Design SR: accept BME1 content type 12 on this reader. Called only after
+    /// both endpoint hellos signed bit 4.
+    pub fn allow_renewal(&mut self) {
+        self.policy.renewal = true;
     }
     pub fn open(&mut self, encoded: &[u8]) -> Result<Record, Error> {
         if self.cipher.is_none() {
@@ -293,6 +317,83 @@ impl Opener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hop_header(kind: u8, sequence: u64, length: u32) -> [u8; 17] {
+        let mut header = [0u8; 17];
+        header[..4].copy_from_slice(b"BMS1");
+        header[4] = kind;
+        header[5..13].copy_from_slice(&sequence.to_be_bytes());
+        header[13..].copy_from_slice(&length.to_be_bytes());
+        header
+    }
+
+    #[test]
+    fn a_hop_wifi_record_is_unknown_unless_the_reader_opted_in() {
+        let mut seal = Sealer::new(
+            Layer::Hop,
+            &[1; 32],
+            Policy {
+                wifi: true,
+                ..Policy::default()
+            },
+        )
+        .unwrap();
+        let record = seal.seal(16, 0, &[0u8; 5]).unwrap();
+        assert_eq!(
+            Header::parse(Layer::Hop, &record[..17], Policy::default()),
+            Err(Error::Type)
+        );
+        let parsed = Header::parse(
+            Layer::Hop,
+            &record[..17],
+            Policy {
+                wifi: true,
+                ..Policy::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(parsed.kind, 16);
+    }
+
+    #[test]
+    fn a_hop_wifi_record_over_96_bytes_of_plaintext_is_refused_at_the_header() {
+        let policy = Policy {
+            wifi: true,
+            ..Policy::default()
+        };
+        assert_eq!(
+            Header::parse(Layer::Hop, &hop_header(16, 1, 113), policy),
+            Err(Error::Size)
+        );
+        assert!(Header::parse(Layer::Hop, &hop_header(16, 1, 112), policy).is_ok());
+    }
+
+    #[test]
+    fn a_hop_wifi_record_under_5_bytes_of_plaintext_is_refused_at_the_header() {
+        let policy = Policy {
+            wifi: true,
+            ..Policy::default()
+        };
+        assert_eq!(
+            Header::parse(Layer::Hop, &hop_header(16, 1, 20), policy),
+            Err(Error::Size)
+        );
+        assert!(Header::parse(Layer::Hop, &hop_header(16, 1, 21), policy).is_ok());
+    }
+
+    #[test]
+    fn kind_16_is_not_accepted_as_the_first_record_when_an_opening_is_required() {
+        let policy = Policy {
+            require_opening: true,
+            wifi: true,
+            ..Policy::default()
+        };
+        assert_eq!(
+            Header::parse(Layer::Hop, &hop_header(16, 0, 21), policy),
+            Err(Error::Type)
+        );
+    }
+
     #[test]
     fn last_permitted_nonce_is_used_once_then_exhaustion_refuses() {
         let mut seal = Sealer::new(Layer::Endpoint, &[0; 32], Policy::default()).unwrap();

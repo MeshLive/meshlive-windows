@@ -86,11 +86,55 @@ impl Target {
     pub fn matches(self, a: &Announcement) -> bool { a.flags & STREAM != 0 && self == Self::from(a) }
 }
 
+/// One route of a logical stream: the stream and the advertiser of that
+/// route (Android `PersonPolicy.routeKey`). The token alone is public and
+/// chosen by the advertiser, so hiding by token would let a blocked
+/// broadcaster hide someone else's stream (review 2026-10-27, finding 1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamRoute {
+    pub logical: u32,
+    pub prefix: [u8; 6],
+}
+impl StreamRoute {
+    pub fn of(a: &Announcement) -> Self {
+        Self { logical: Target::from(a).logical, prefix: a.prefix }
+    }
+}
+
+/// Routes whose source is a blocked person (Android `PersonPolicy` hidden
+/// streams): for this run only, at most 256 (the oldest goes), each with the
+/// source's node ID so an unblock brings them back.
+#[derive(Clone, Debug, Default)]
+pub struct HiddenRoutes {
+    routes: Vec<(StreamRoute, [u8; 16])>,
+}
+impl HiddenRoutes {
+    pub const MAX: usize = 256;
+    pub fn hide(&mut self, route: StreamRoute, source: [u8; 16]) {
+        self.routes.retain(|(r, _)| *r != route);
+        self.routes.push((route, source));
+        while self.routes.len() > Self::MAX {
+            self.routes.remove(0);
+        }
+    }
+    pub fn contains(&self, route: &StreamRoute) -> bool {
+        self.routes.iter().any(|(r, _)| r == route)
+    }
+    /// Keeps the routes whose source `keep` says is still blocked.
+    pub fn retain_sources(&mut self, mut keep: impl FnMut(&[u8; 16]) -> bool) {
+        self.routes.retain(|(_, source)| keep(source));
+    }
+    pub fn clear(&mut self) {
+        self.routes.clear();
+    }
+}
+
 /// Why this PC can't watch an offer (None: it can), in the words the Live
 /// row shows. A version 2 offer is a privacy policy, not a limit (Design QV
-/// R7): joining it means advertising this PC's fixed ID to everyone nearby,
-/// so the phone has to use Android's "Private Bluetooth ID" (rotating IDs).
-pub const NEEDS_PRIVATE_ID: &str = "Ask them to turn on Private Bluetooth ID";
+/// R7): joining it means advertising this PC's fixed ID to everyone nearby.
+/// Android 0.4.4 and older had a "Private Bluetooth ID" switch; current
+/// Android always rotates IDs, so the fix is usually an update.
+pub const NEEDS_PRIVATE_ID: &str = "Ask them to update MeshLive (or turn on Private Bluetooth ID in its Settings)";
 /// Design HC (the cost of its stream order): an HEVC stream on a PC without Microsoft's
 /// HEVC Video Extensions (or with the HEVC master off).
 pub const NEEDS_HEVC: &str = "This PC can't decode HEVC: it needs Microsoft's HEVC Video Extensions";
@@ -137,6 +181,10 @@ pub struct Joined {
     pub buffer: Vec<u8>,
     pub source: [u8; 16],
     pub parent: [u8; 16],
+    /// The source's full fingerprint when this PC authenticated the source
+    /// itself (a direct route: the endpoint handshake is the source); None
+    /// for a forwarded route, whose source only the forwarder's BFG1 names.
+    pub source_fingerprint: Option<[u8; 32]>,
     pub recovery_key: Option<Zeroizing<[u8; 32]>>,
     pub codec_mask: u8,
     labels: Option<Vec<u8>>,
@@ -243,7 +291,8 @@ pub fn join<C: Carrier, I: SigningIdentity>(
     // relayed offer has no source hello to intersect with).
     let codec_mask = decode_mask & codecs::summary_to_hello(offer.summary)
         & if offer.cost == 0 { endpoint.peer().capabilities.encode_codecs } else { codecs::HELLO_CODECS };
-    Ok(Joined { reader, uplink, buffer, source, parent: link.peer().node_id, recovery_key, codec_mask, labels })
+    let source_fingerprint = (offer.cost == 0).then_some(endpoint.peer().fingerprint);
+    Ok(Joined { reader, uplink, buffer, source, parent: link.peer().node_id, source_fingerprint, recovery_key, codec_mask, labels })
 }
 
 #[derive(Default)]
@@ -301,6 +350,37 @@ impl Offers {
     pub fn rows(&self, mask: u8) -> Vec<(u32, &Sighting)> {
         self.rows.iter().map(|(id, _)| *id).collect::<std::collections::BTreeSet<_>>().into_iter()
             .filter_map(|id| self.best(id, mask).map(|s| (id, s))).collect()
+    }
+    /// The Live list as Android `hideBlockedStreams`, with one binding
+    /// Windows difference (review 2026-11-06, finding 2): hide only the
+    /// cost-0 route `blocked_source` attributes to a blocked person, plus the
+    /// routes in `hidden`. Relayed routes and other direct routes of the same
+    /// public token stay listed: the token is chosen by the advertiser, so
+    /// hiding every route of it would let a spoofer hide a genuine user's
+    /// stream. Watching one still leaves before media when its source
+    /// authenticates as blocked.
+    pub fn visible_rows(&self, mask: u8, hidden: &HiddenRoutes, mut blocked_source: impl FnMut(&Announcement) -> bool) -> Vec<(u32, &Sighting)> {
+        let attributed: Vec<StreamRoute> = self
+            .routes()
+            .filter(|s| s.announcement.cost == 0 && !hidden.contains(&StreamRoute::of(&s.announcement)))
+            .filter(|s| blocked_source(&s.announcement))
+            .map(|s| StreamRoute::of(&s.announcement))
+            .collect();
+        let open = |s: &Sighting| {
+            let route = StreamRoute::of(&s.announcement);
+            !hidden.contains(&route) && !attributed.contains(&route)
+        };
+        let ids: std::collections::BTreeSet<u32> = self.rows.iter().map(|(id, _)| *id).collect();
+        ids.into_iter()
+            .filter_map(|id| {
+                self.rows
+                    .iter()
+                    .filter(|(h, s)| *h == id && open(s))
+                    .map(|(_, s)| s)
+                    .min_by_key(|s| (unavailable(&s.announcement, mask).is_some() || s.announcement.sequence & 0x80 != 0, s.announcement.cost))
+                    .map(|s| (id, s))
+            })
+            .collect()
     }
 }
 

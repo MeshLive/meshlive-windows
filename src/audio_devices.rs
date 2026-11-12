@@ -253,6 +253,24 @@ pub fn call_render(endpoints: &[Endpoint], mic: Option<&str>) -> Option<(String,
         .map(|e| (e.id.clone(), RenderReason::SameContainer))
 }
 
+/// The call screen's audio outputs (Android `CallOutputChoices.options` on a
+/// PC): every active render endpoint once, by its Windows name, in Windows'
+/// order, as (endpoint id, name). The Speaker button picks among them.
+/// Bluetooth headsets are left out, as Android leaves them out by default
+/// (`CallBluetoothOutputFeature`, off): their audio shares airtime with the
+/// Bluetooth link that carries the call itself.
+pub fn render_outputs(endpoints: &[Endpoint]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let bluetooth = |e: &Endpoint| e.enumerator.to_ascii_uppercase().starts_with("BTH");
+    for endpoint in endpoints.iter().filter(|e| e.flow == Flow::Render && !bluetooth(e)) {
+        if !out.iter().any(|(id, _)| *id == endpoint.id) {
+            let name = if endpoint.name.trim().is_empty() { "Speakers".to_owned() } else { endpoint.name.clone() };
+            out.push((endpoint.id.clone(), name));
+        }
+    }
+    out
+}
+
 /// Keep the communications default (pure)? Yes unless there is evidence it
 /// cannot deliver audio: no packets, SILENT flags, the endpoint muted, or a
 /// privacy Deny. Silence alone is not evidence: a DSP noise gate outputs
@@ -546,5 +564,20 @@ mod tests {
         assert_eq!(best_probe(&probes[..2]).as_deref(), Some("gated"), "a gated real endpoint still qualifies");
         assert_eq!(best_probe(&probes[..1]), None);
         assert_eq!(best_probe(&probes[4..]).as_deref(), Some("virtual"));
+    }
+    #[test]
+    fn the_output_picker_lists_each_speaker_once_and_never_a_microphone_or_a_bluetooth_headset() {
+        let list = vec![
+            in_container("array", "HDAUDIO", Flow::Capture, true, true, "a"),
+            in_container("Speakers (Realtek)", "HDAUDIO", Flow::Render, true, true, "a"),
+            in_container("Headset (Jabra)", "USB", Flow::Render, false, false, "b"),
+            in_container("Headset (Jabra)", "USB", Flow::Render, false, false, "b"),
+            in_container("Earbuds", "BTHHFENUM", Flow::Render, false, false, "d"),
+            in_container("", "HDAUDIO", Flow::Render, false, false, "c"),
+        ];
+        let outputs = render_outputs(&list);
+        let names: Vec<&str> = outputs.iter().map(|(_, n)| n.as_str()).collect();
+        assert_eq!(names, ["Speakers (Realtek)", "Headset (Jabra)", "Speakers"], "a nameless endpoint still gets a name");
+        assert!(render_outputs(&list[..1]).is_empty(), "a microphone is not an output");
     }
 }

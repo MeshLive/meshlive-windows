@@ -261,13 +261,18 @@ pub fn share_with(dir: &Path, open: &mut dyn FnMut(&str) -> bool) -> Result<(), 
     mark_shown(dir).map_err(|_| "Couldn't mark the report as offered.".into())
 }
 
+/// Opens a link (a `mailto:` draft) with the shell's handler for it, the
+/// user's email app. Sending stays the user's action there. False when
+/// nothing could open it (ShellExecute reports success as a value above 32).
+pub fn open_uri(uri: &str) -> bool {
+    use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+    let uri = windows::core::HSTRING::from(uri);
+    let result = unsafe { ShellExecuteW(None, windows::core::w!("open"), windows::core::PCWSTR(uri.as_ptr()), None, None, SW_SHOWNORMAL) };
+    result.0 as isize > 32
+}
+
 pub fn share(dir: &Path) -> Result<(), String> {
-    share_with(dir, &mut |uri| {
-        use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
-        let uri = windows::core::HSTRING::from(uri);
-        let result = unsafe { ShellExecuteW(None, windows::core::w!("open"), windows::core::PCWSTR(uri.as_ptr()), None, None, SW_SHOWNORMAL) };
-        result.0 as isize > 32
-    })
+    share_with(dir, &mut |uri| open_uri(uri))
 }
 
 mod native {

@@ -112,6 +112,11 @@ impl Liveness {
     pub fn dead(&self, now_ns: u64) -> bool {
         now_ns.saturating_sub(self.last_received_ns) >= HEARTBEAT_TIMEOUT_NS
     }
+    /// Carrier 0 delivered a complete authenticated record within the last `window_ms`.
+    pub fn received_within(&self, now_ns: u64, window_ms: i64) -> bool {
+        let window_ns = (window_ms.max(0) as u64).saturating_mul(1_000_000);
+        now_ns.saturating_sub(self.last_received_ns) < window_ns
+    }
 }
 
 #[cfg(test)]

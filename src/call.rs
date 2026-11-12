@@ -10,13 +10,23 @@ use crate::{
     media::{self, AUDIO, CONFIG},
     records::{self, Layer, Opener, Policy, Sealer},
 };
+use std::collections::VecDeque;
+
+pub mod carriers;
 
 pub const SIGNAL_BYTES: usize = 23;
 pub const MAX_RELAY_HOPS: u8 = 15;
 
-/// Android CallMediaGate parity; retained control arm until review.
+/// Android CallMediaGate parity; retained control arm until review. The
+/// `=0` control arm weakens a protection, so only a debug or test-hooks build
+/// reads it (SEC-13): the release app always gates media.
 pub fn media_gate_enabled() -> bool {
-    std::env::var("MESHLIVE_CALL_MEDIA_GATE").as_deref() != Ok("0")
+    media_gate_from(crate::control_arms::var(MEDIA_GATE_SWITCH).as_deref())
+}
+pub const MEDIA_GATE_SWITCH: &str = "MESHLIVE_CALL_MEDIA_GATE";
+/// The media gate for an arm value as the build reads it (None: not set).
+pub fn media_gate_from(value: Option<&str>) -> bool {
+    value != Some("0")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +40,10 @@ pub enum Error {
     Fragment,
     Kind,
     Heartbeat,
+    /// A local `BWF1` misuse (sealing for a carrier that does not exist, `enable_wifi` failing).
+    Wifi,
+    /// A fault of Wi-Fi carrier `n`: it closes that carrier only.
+    Carrier(i32),
     Frame(framing::Error),
     Record(records::Error),
     Media(media::Error),
@@ -303,6 +317,9 @@ impl Controller {
     pub fn call_id(&self) -> [u8; 16] {
         self.call_id
     }
+    pub fn role(&self) -> Role {
+        self.role
+    }
     pub fn relay_hops(&self) -> u8 {
         self.relay_hops
     }
@@ -450,6 +467,30 @@ impl Controller {
     pub fn should_send_video(&self) -> bool {
         self.camera && matches!(self.phase, Phase::NegotiatingMedia | Phase::Active)
     }
+    /// The indispensable state as signals (idempotent at the receiver), for a standby replacement.
+    pub fn reassert(&self) -> Result<Vec<Message>, Error> {
+        if !matches!(self.phase, Phase::NegotiatingMedia | Phase::Active) {
+            return Ok(Vec::new());
+        }
+        Ok(vec![
+            Message::simple(
+                self.call_id,
+                if self.camera {
+                    Signal::CameraOn
+                } else {
+                    Signal::CameraOff
+                },
+            )?,
+            Message::simple(
+                self.call_id,
+                if self.microphone {
+                    Signal::MicrophoneUnmuted
+                } else {
+                    Signal::MicrophoneMuted
+                },
+            )?,
+        ])
+    }
 }
 
 /// Experimental call video fragments (off by default).
@@ -500,10 +541,16 @@ pub mod fragments {
         buffer: Option<Vec<u8>>,
         total: usize,
         flags: u8,
+        suppress: bool,
     }
     impl Reassembler {
         pub fn in_progress(&self) -> bool {
             self.buffer.is_some()
+        }
+        /// Drop the partial frame; later fragments are skipped until offset 0.
+        pub fn suppress(&mut self) {
+            self.buffer = None;
+            self.suppress = true;
         }
         pub fn accept(&mut self, flags: u8, fragment: &[u8]) -> Result<Option<Vec<u8>>, Error> {
             if flags & (AUDIO | CONFIG) != 0 || fragment.len() <= HEADER_BYTES {
@@ -511,6 +558,12 @@ pub mod fragments {
             }
             let total = u32::from_be_bytes(fragment[..4].try_into().unwrap()) as usize;
             let offset = u32::from_be_bytes(fragment[4..8].try_into().unwrap()) as usize;
+            if self.suppress {
+                if offset != 0 || self.buffer.is_some() {
+                    return Ok(None);
+                }
+                self.suppress = false;
+            }
             let chunk = &fragment[HEADER_BYTES..];
             match &self.buffer {
                 None => {
@@ -573,6 +626,13 @@ pub enum Incoming {
     /// A LABELS record (content type 10); only on links opened with labels
     /// (a BVMID2 verification session accepts the scanner's name label).
     Labels(Vec<u8>),
+    /// A Design SR RENEW record (BME1 content type 12); only on a link that
+    /// negotiated renewal. The body carries a ticket: never log it.
+    Renew(Vec<u8>),
+    /// A decoded `BWF1` record that belongs to the call session (`CAPS`, `HOST`, ...).
+    Wifi(crate::wifi::wire::Bwf1),
+    /// A `BWF1` fault on carrier 0: it ends Wi-Fi for the call, never the call.
+    WifiFault(&'static str),
 }
 
 /// Full-duplex call records over one link: BMS1 hop records carrying BME1 call
@@ -588,7 +648,24 @@ pub struct CallLink {
     fragments: bool,
     fragment_controls: bool,
     fragment_progress: bool,
+    /// Design SR `K_renew`; None unless both endpoint hellos signed bit 4
+    /// (memory only, zeroed on drop, never logged).
+    renewal: Option<zeroize::Zeroizing<[u8; 32]>>,
+    /// The checked fact that the link's authenticated peer is the end-to-end peer.
+    renewal_direct: bool,
     reassembler: fragments::Reassembler,
+    content_policy: Policy,
+    carriers: Option<Box<carriers::Carriers>>,
+    /// Received items and the carrier each arrived on.
+    ready: VecDeque<(i32, Incoming)>,
+    /// The carrier of the item `read_from` returned last.
+    last_carrier: i32,
+    /// `Some(carrier)` of the record sealed last; None = dropped.
+    pub(crate) target: Option<i32>,
+    /// The session clock in milliseconds (`set_clock`).
+    now_ms: i64,
+    /// A hop record authenticated on the carrier being read (`take_heard`).
+    heard: bool,
 }
 impl CallLink {
     pub fn new(
@@ -610,7 +687,16 @@ impl CallLink {
             fragments: fragments_negotiated,
             fragment_controls: false,
             fragment_progress: false,
+            renewal: None,
+            renewal_direct: false,
             reassembler: fragments::Reassembler::default(),
+            content_policy: content,
+            carriers: None,
+            ready: VecDeque::new(),
+            last_carrier: 0,
+            target: None,
+            now_ms: 0,
+            heard: false,
         })
     }
     /// Continues a link whose hop records already carried the endpoint
@@ -650,7 +736,16 @@ impl CallLink {
             fragments: fragments_negotiated,
             fragment_controls: false,
             fragment_progress: false,
+            renewal: None,
+            renewal_direct: false,
             reassembler: fragments::Reassembler::default(),
+            content_policy: content,
+            carriers: None,
+            ready: VecDeque::new(),
+            last_carrier: 0,
+            target: None,
+            now_ms: 0,
+            heard: false,
         })
     }
     /// Android's endpoint reader handles authenticated call controls during
@@ -663,17 +758,179 @@ impl CallLink {
     pub(crate) fn take_fragment_progress(&mut self) -> bool {
         std::mem::take(&mut self.fragment_progress)
     }
+    /// Whether a hop record authenticated on the carrier read since the last
+    /// call (content, marker, heartbeat or held record alike).
+    pub(crate) fn take_heard(&mut self) -> bool {
+        std::mem::take(&mut self.heard)
+    }
+    /// R-1 at the write: `BWF1` goes only to a peer proven to read it.
+    pub(crate) fn may_write_bwf1(&self) -> bool {
+        self.carriers.as_deref().is_some_and(|carriers| carriers.may_write_bwf1())
+    }
+    /// Drop the partial received frame; later fragments are skipped until offset 0.
+    pub fn suppress_fragments(&mut self) {
+        self.reassembler.suppress();
+    }
+    /// Opts this link into `BWF1` and derives `UW` from the exporter (which is not kept).
+    pub fn enable_wifi(
+        &mut self,
+        exporter: &[u8; 32],
+        initiator: bool,
+        relay_edge: bool,
+    ) -> Result<(), Error> {
+        let uw = crate::wifi::keys::uw_for_call(exporter).map_err(|_| Error::Wifi)?;
+        self.carriers = Some(Box::new(carriers::Carriers::new(uw, initiator, relay_edge)));
+        Ok(())
+    }
+    pub fn wifi_enabled(&self) -> bool {
+        self.carriers.is_some()
+    }
+    pub(crate) fn carriers_mut(&mut self) -> Option<&mut carriers::Carriers> {
+        self.carriers.as_deref_mut()
+    }
+    pub(crate) fn carriers(&self) -> Option<&carriers::Carriers> {
+        self.carriers.as_deref()
+    }
+    pub fn target(&self) -> Option<i32> {
+        self.target
+    }
+    pub(crate) fn clear_target(&mut self) {
+        self.target = None;
+    }
+    pub(crate) fn set_clock(&mut self, now_ns: u64) {
+        self.now_ms = (now_ns / 1_000_000) as i64;
+    }
+    pub fn last_carrier(&self) -> i32 {
+        self.last_carrier
+    }
     /// One LABELS record (content type 10); only on a link opened with labels.
     pub fn labels(&mut self, record: &[u8]) -> Result<Vec<u8>, Error> {
         self.wrap(10, 0, record)
+    }
+    /// Design SR: opt this link into content type 12 (reader and writer) and
+    /// keep `K_renew` with the session. Called only when both endpoint hellos
+    /// signed bit 4. `direct_link` is the caller's checked fact that the
+    /// link's authenticated peer is the end-to-end peer.
+    pub fn enable_renewal(&mut self, k1: &[u8; 32], k2: &[u8; 32], direct_link: bool) -> Result<(), Error> {
+        let key = crate::call_renewal::k_renew(k1, k2).map_err(|_| Error::Kind)?;
+        self.content_in.allow_renewal();
+        self.content_out.allow_renewal();
+        self.content_policy.renewal = true;
+        self.renewal = Some(key);
+        self.renewal_direct = direct_link;
+        Ok(())
+    }
+    /// A copy of `K_renew` for the opening (zeroed on drop); None unless negotiated.
+    pub fn renewal_key(&self) -> Option<zeroize::Zeroizing<[u8; 32]>> {
+        self.renewal.clone()
+    }
+    /// Renewal was negotiated and the link's peer was checked to be the end-to-end peer.
+    pub fn renewal_direct(&self) -> bool {
+        self.renewal.is_some() && self.renewal_direct
+    }
+    /// One RENEW record (content type 12) on the current hop; refused unless negotiated.
+    pub fn renew(&mut self, record: &[u8]) -> Result<Vec<u8>, Error> {
+        if self.renewal.is_none() {
+            return Err(Error::Kind);
+        }
+        self.wrap(crate::call_renewal::CONTENT_TYPE, 0, record)
+    }
+    /// The end-to-end content sequence the next record will carry.
+    pub fn next_content_sequence(&self) -> u64 {
+        self.content_out.next_sequence()
+    }
+    /// The hop layer of a renewed link: this link's hop policy (BWF1 markers
+    /// kept) minus the opening, keyed with the renewal's hop keys.
+    pub fn new_hop_layer(&self, send: &[u8; 32], receive: &[u8; 32]) -> Result<(Sealer, HopReader), Error> {
+        let policy = Policy { wifi: self.carriers.is_some(), ..Policy::default() };
+        Ok((Sealer::new(Layer::Hop, send, policy)?, HopReader::new(receive, policy)?))
+    }
+    /// Design SR BIND, sealed in one step: the body names this record's own
+    /// end-to-end sequence plus one, the record is hop-sealed with the NEW
+    /// link's sealer (it is that link's first BMS1 record), and nothing is
+    /// sealed in between. Never routed through the Wi-Fi carriers.
+    pub fn seal_bind(&mut self, ticket: &[u8; 8], new_hop_out: &mut Sealer) -> Result<Vec<u8>, Error> {
+        if self.renewal.is_none() {
+            return Err(Error::Kind);
+        }
+        let own = self.content_out.next_sequence();
+        let body = crate::call_renewal::encode(&crate::call_renewal::Op::Bind { ticket: *ticket, next_sequence: own + 1 });
+        let inner = self.content_out.seal(crate::call_renewal::CONTENT_TYPE, 0, &body)?;
+        self.target = Some(0);
+        Ok(new_hop_out.seal(5, 0, &inner)?)
+    }
+    /// The armed side opens the first BMS1 record of the proved connection
+    /// (`inner`: its type-5 plaintext) directly, never through the carriers.
+    /// Only a type-12 BIND for `ticket` whose next sequence is the record's
+    /// own sequence plus one passes; the returned value is that next sequence.
+    pub fn open_bind(&mut self, inner: &[u8], ticket: &[u8; 8]) -> Option<u64> {
+        self.renewal.as_ref()?;
+        // A record sealed after this BIND (a Wi-Fi carrier's) may have reached the
+        // peer first and taken its sequence: refuse the BIND without opening it,
+        // since a failed open would fault the end-to-end session.
+        let header = inner.get(..Layer::Endpoint.header_bytes())?;
+        self.content_in.inspect_header(header, usize::MAX).ok()?;
+        let record = self.content_in.open(inner).ok()?;
+        if record.header.kind != crate::call_renewal::CONTENT_TYPE {
+            return None;
+        }
+        match crate::call_renewal::decode(&record.plaintext) {
+            Ok(crate::call_renewal::Op::Bind { ticket: bound, next_sequence })
+                if bound == *ticket && next_sequence == record.header.sequence + 1 =>
+            {
+                Some(next_sequence)
+            }
+            _ => None,
+        }
+    }
+    /// Keep the end-to-end session and content sequences and replace only
+    /// the hop layer after a Design SR BIND.
+    pub fn rebind_hop(&mut self, hop_out: Sealer, hop_in: HopReader) {
+        self.hop_out = hop_out;
+        self.hop_in = hop_in;
     }
     /// One BDX1 record (content type 11), e.g. a REVEAL.
     pub fn discovery(&mut self, record: &[u8]) -> Result<Vec<u8>, Error> {
         self.wrap(11, 0, record)
     }
     fn wrap(&mut self, kind: u8, flags: u8, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
+        let seq = self.content_out.next_sequence() as i64;
         let inner = self.content_out.seal(kind, flags, plaintext)?;
-        Ok(self.hop_out.seal(5, 0, &inner)?)
+        if self.carriers.is_none() {
+            self.target = Some(0);
+            return Ok(self.hop_out.seal(5, 0, &inner)?);
+        }
+        let route = self
+            .carriers
+            .as_mut()
+            .unwrap()
+            .route_sealed(seq, inner, self.now_ms);
+        match route {
+            Some((0, inner)) => {
+                self.target = Some(0);
+                Ok(self.hop_out.seal(5, 0, &inner)?)
+            }
+            Some((id, inner)) => {
+                let carriers = self.carriers.as_mut().unwrap();
+                match carriers.extra_mut().filter(|extra| extra.id == id) {
+                    Some(extra) => {
+                        self.target = Some(id);
+                        Ok(extra.hop_out.seal(5, 0, &inner)?)
+                    }
+                    None => {
+                        // The machine routes to a carrier this link no longer has:
+                        // close that carrier (the record is its lossy tail), never the call.
+                        carriers.carrier_died(id, self.now_ms);
+                        self.target = None;
+                        Ok(Vec::new())
+                    }
+                }
+            }
+            None => {
+                self.target = None;
+                Ok(Vec::new())
+            }
+        }
     }
     pub fn signal(&mut self, message: &Message) -> Result<Vec<u8>, Error> {
         let raw = message.encode()?;
@@ -687,8 +944,101 @@ impl CallLink {
         self.wrap(5, 0, &[])
     }
     pub fn heartbeat(&mut self, report: Option<&link::Report>) -> Result<Vec<u8>, Error> {
+        self.target = Some(0);
         let payload = report.map_or_else(|| link::keepalive().to_vec(), link::encode);
         Ok(self.hop_out.seal(6, 0, &payload)?)
+    }
+    /// A heartbeat on carrier 0 or on the attached Wi-Fi carrier.
+    pub fn heartbeat_on(&mut self, carrier: i32, report: Option<&link::Report>) -> Result<Vec<u8>, Error> {
+        if carrier == 0 {
+            return self.heartbeat(report);
+        }
+        let Some(extra) = self
+            .carriers
+            .as_mut()
+            .and_then(|carriers| carriers.extra_mut())
+            .filter(|extra| extra.id == carrier)
+        else {
+            // No such carrier: nothing is written (`target` None), the call goes on.
+            self.target = None;
+            return Ok(Vec::new());
+        };
+        self.target = Some(carrier);
+        let payload = report.map_or_else(|| link::keepalive().to_vec(), link::encode);
+        Ok(extra.hop_out.seal(6, 0, &payload)?)
+    }
+    /// One `BWF1` record hop-sealed on `carrier`. `Err(Wifi)` when the peer is
+    /// not proven to read `BWF1` (R-1), the record breaks a field rule, or the
+    /// carrier is not attached; nothing is sealed then.
+    pub fn seal_bwf1(&mut self, carrier: i32, record: &crate::wifi::wire::Bwf1) -> Result<Vec<u8>, Error> {
+        if !self.may_write_bwf1() {
+            return Err(Error::Wifi);
+        }
+        let plaintext = record.encode().map_err(|_| Error::Wifi)?;
+        if carrier == 0 {
+            self.target = Some(0);
+            return Ok(self.hop_out.seal(16, 0, &plaintext)?);
+        }
+        self.target = Some(carrier);
+        let extra = self
+            .carriers
+            .as_mut()
+            .and_then(|carriers| carriers.extra_mut())
+            .filter(|extra| extra.id == carrier)
+            .ok_or(Error::Wifi)?;
+        Ok(extra.hop_out.seal(16, 0, &plaintext)?)
+    }
+    /// Test only: seal an endpoint record (returns the inner BME1 record).
+    #[cfg(test)]
+    pub(crate) fn test_seal_endpoint(
+        &mut self,
+        kind: u8,
+        flags: u8,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        self.content_out.seal(kind, flags, plaintext).map_err(Error::from)
+    }
+    /// Test only: hop-seal an inner record (advances the hop sequence).
+    #[cfg(test)]
+    pub(crate) fn test_seal_hop(&mut self, inner: &[u8]) -> Result<Vec<u8>, Error> {
+        self.hop_out.seal(5, 0, inner).map_err(Error::from)
+    }
+    /// Test only: hop-seal an inner record on a chosen carrier.
+    #[cfg(test)]
+    pub(crate) fn test_seal_hop_on(
+        &mut self,
+        carrier: i32,
+        inner: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        if carrier == 0 {
+            return self.hop_out.seal(5, 0, inner).map_err(Error::from);
+        }
+        let extra = self
+            .carriers
+            .as_mut()
+            .and_then(|carriers| carriers.extra_mut())
+            .filter(|extra| extra.id == carrier)
+            .ok_or(Error::Wifi)?;
+        extra.hop_out.seal(5, 0, inner).map_err(Error::from)
+    }
+    /// Test only: hop-seal any hop kind and plaintext on a chosen carrier.
+    #[cfg(test)]
+    pub(crate) fn test_seal_kind_on(
+        &mut self,
+        carrier: i32,
+        kind: u8,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        if carrier == 0 {
+            return self.hop_out.seal(kind, 0, plaintext).map_err(Error::from);
+        }
+        let extra = self
+            .carriers
+            .as_mut()
+            .and_then(|carriers| carriers.extra_mut())
+            .filter(|extra| extra.id == carrier)
+            .ok_or(Error::Wifi)?;
+        extra.hop_out.seal(kind, 0, plaintext).map_err(Error::from)
     }
     /// How one encoded BTV3 packet goes on the wire: whole, or as ordered
     /// fragments when negotiated. Parts are sealed one at a time at write time,
@@ -722,34 +1072,152 @@ impl CallLink {
     /// `Ok(None)` only when more input is needed; an unfinished fragmented
     /// frame keeps reading the following records.
     pub fn read(&mut self, input: &mut &[u8]) -> Result<Option<Incoming>, Error> {
-        self.read_in_phase(input, Some(Phase::Active))
+        self.read_from(0, input, Some(Phase::Active))
     }
     /// Authenticate before applying Android's call-media phase rule, and apply
     /// it before parsing a header/packet or retaining a video fragment.
     pub(crate) fn read_in_phase(&mut self, input: &mut &[u8], phase: Option<Phase>) -> Result<Option<Incoming>, Error> {
+        self.read_from(0, input, phase)
+    }
+    pub(crate) fn read_from(
+        &mut self,
+        carrier: i32,
+        input: &mut &[u8],
+        phase: Option<Phase>,
+    ) -> Result<Option<Incoming>, Error> {
         self.fragment_progress = false;
         loop {
-            if let Some(incoming) = self.read_record(input, phase)? {
+            if let Some((arrived_on, incoming)) = self.ready.pop_front() {
+                self.last_carrier = arrived_on;
+                return Ok(Some(incoming));
+            }
+            if let Some(incoming) = self.read_record(carrier, input, phase)? {
+                self.last_carrier = carrier;
                 return Ok(Some(incoming));
             }
             if input.is_empty() {
-                return Ok(None);
+                return Ok(self.ready.pop_front().map(|(arrived_on, incoming)| {
+                    self.last_carrier = arrived_on;
+                    incoming
+                }));
             }
         }
     }
-    fn read_record(&mut self, input: &mut &[u8], phase: Option<Phase>) -> Result<Option<Incoming>, Error> {
-        let Some(record) = self.hop_in.read(input, Layer::Hop.maximum_ciphertext())? else {
+    fn read_record(&mut self, carrier: i32, input: &mut &[u8], phase: Option<Phase>) -> Result<Option<Incoming>, Error> {
+        let maximum = Layer::Hop.maximum_ciphertext();
+        let record = if carrier == 0 {
+            self.hop_in.read(input, maximum)?
+        } else {
+            let Some(extra) = self
+                .carriers
+                .as_mut()
+                .and_then(|carriers| carriers.extra_mut())
+                .filter(|extra| extra.id == carrier)
+            else {
+                return Err(Error::Carrier(carrier));
+            };
+            match extra.hop_in.read(input, maximum) {
+                Ok(record) => record,
+                Err(_) => return Err(Error::Carrier(carrier)),
+            }
+        };
+        let Some(record) = record else {
             return Ok(None);
         };
+        self.heard = true;
         match record.header.kind {
+            6 if carrier != 0 => {
+                // A Wi-Fi carrier's reports are liveness only (amendment 22 d):
+                // an authenticated heartbeat is a pulse whatever its payload.
+                return Ok(Some(Incoming::Heartbeat(None)));
+            }
             6 => {
                 let report = link::decode(&record.plaintext).map_err(|_| Error::Heartbeat)?;
                 return Ok(Some(Incoming::Heartbeat(report)));
             }
-            5 => {}
-            _ => return Err(Error::Kind),
+            16 => {
+                let Some(carriers) = self.carriers.as_mut() else {
+                    return Err(Error::Kind);
+                };
+                // An authenticated BWF1 record: the peer reads BWF1 (R-1).
+                carriers.note_peer_bwf1();
+                let record = match crate::wifi::wire::Bwf1::decode(&record.plaintext) {
+                    Ok(record) => record,
+                    Err(crate::wifi::wire::Error::Kind) => {
+                        carriers.trace("bwf1_ignored", format!("carrier={carrier} | reason=kind"));
+                        return Ok(None);
+                    }
+                    Err(_) => {
+                        return if carrier == 0 {
+                            Ok(Some(Incoming::WifiFault("bwf1_malformed")))
+                        } else {
+                            Err(Error::Carrier(carrier))
+                        };
+                    }
+                };
+                if matches!(
+                    record,
+                    crate::wifi::wire::Bwf1::Switch(_) | crate::wifi::wire::Bwf1::Resume(_)
+                ) {
+                    if let Some(carriers) = self.carriers.as_mut() {
+                        carriers.arrive_marker(carrier, record, self.now_ms);
+                    }
+                    self.drain_carriers(phase)?;
+                    return Ok(None);
+                }
+                if carrier == 0 {
+                    return match record {
+                        crate::wifi::wire::Bwf1::Bind(_)
+                        | crate::wifi::wire::Bwf1::Ready(_)
+                        | crate::wifi::wire::Bwf1::Pick(_)
+                        | crate::wifi::wire::Bwf1::Armed(_) => {
+                            Ok(Some(Incoming::WifiFault("bwf1_unexpected")))
+                        }
+                        other => Ok(Some(Incoming::Wifi(other))),
+                    };
+                }
+                return match record {
+                    crate::wifi::wire::Bwf1::Close(_) => Ok(Some(Incoming::Wifi(record))),
+                    _ => Err(Error::Carrier(carrier)),
+                };
+            }
+            5 => {
+                if self.carriers.is_none() {
+                    return self.decode_content(&record.plaintext, phase);
+                }
+                let content = self.content_policy;
+                let now_ms = self.now_ms;
+                if let Some(carriers) = self.carriers.as_mut() {
+                    carriers.arrive_content(carrier, record.plaintext, content, now_ms)?;
+                }
+                self.drain_carriers(phase)?;
+                return Ok(None);
+            }
+            _ => {
+                return if carrier == 0 {
+                    Err(Error::Kind)
+                } else {
+                    Err(Error::Carrier(carrier))
+                };
+            }
         }
-        let content = self.content_in.open(&record.plaintext)?;
+    }
+    fn drain_carriers(&mut self, phase: Option<Phase>) -> Result<(), Error> {
+        loop {
+            let next = self
+                .carriers
+                .as_mut()
+                .and_then(|carriers| carriers.take_delivered());
+            let Some((carrier, inner)) = next else {
+                return Ok(());
+            };
+            if let Some(incoming) = self.decode_content(&inner, phase)? {
+                self.ready.push_back((carrier, incoming));
+            }
+        }
+    }
+    fn decode_content(&mut self, plaintext: &[u8], phase: Option<Phase>) -> Result<Option<Incoming>, Error> {
+        let content = self.content_in.open(plaintext)?;
         if matches!(content.header.kind, 1 | 2 | 9) {
             match phase {
                 Some(Phase::NegotiatingMedia | Phase::Active) => {},
@@ -798,6 +1266,7 @@ impl CallLink {
             },
             11 => Ok(Some(Incoming::Discovery(content.plaintext))),
             10 => Ok(Some(Incoming::Labels(content.plaintext))),
+            12 => Ok(Some(Incoming::Renew(content.plaintext))),
             _ => Err(Error::Kind),
         }
     }
@@ -808,14 +1277,16 @@ mod tests;
 
 #[cfg(test)]
 mod renewal_bit {
-    /// Android's in-call link renewal (Design SR) is negotiated by end-to-end
-    /// hello transport bit 4 (0x10). Windows does not implement it, so its
-    /// end-to-end hellos never set that bit (a peer then never offers it).
+    /// Design SR: the in-call link renewal is negotiated by end-to-end hello
+    /// transport bit 4 (0x10). Only the call hello builders set it, through
+    /// the pure helper and only with the switch on; the shared transport
+    /// helper (also used by verification hellos) never does.
     #[test]
-    fn the_end_to_end_hello_never_sets_the_renewal_bit() {
+    fn the_renewal_bit_is_set_only_by_the_call_hello_builder_with_the_switch_on() {
         for base in [crate::incoming::CAPABILITIES.transport, 0x0c] {
-            let transport = super::fragments::endpoint_transport(base) | crate::labels::CAPABILITY_BIT;
-            assert_eq!(transport & 0x10, 0, "{transport:#04x}");
+            assert_eq!(super::fragments::endpoint_transport(base) & 0x10, 0);
+            assert_eq!(crate::call_renewal::transport(base, false) & 0x10, 0);
+            assert_eq!(crate::call_renewal::transport(base, true) & 0x10, 0x10);
         }
     }
 }

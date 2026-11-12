@@ -17,13 +17,20 @@ pub enum Command {
     /// continuously while it is (CF-DISC-29).
     PeopleVisible(bool),
     StreamsVisible(bool),
-    Watch(Handle),
+    /// Start watching this stream; `watch` identifies this watch in the
+    /// task's updates, so a late update from an older watch is ignored.
+    Watch { id: Handle, watch: u64 },
     StopWatching,
     /// Mute/unmute what is being listened to or watched (audio output only).
     MuteWatch(bool),
     Call { person: Handle, voice: bool },
     /// A signal for the active call, already produced by call::Controller.
     CallSignal(Message),
+    /// The Speaker button's pick: play this call through this render
+    /// endpoint (its id from `Update::CallOutputs`).
+    CallOutput(String),
+    /// Flip: the call's or the broadcast's camera switches to the next one.
+    SwitchCamera,
     GoLive { kind: LiveKind, title: String, initial: meshlive::stream_source::InitialMedia },
     ConfigureLive(meshlive::stream_source::Settings),
     LiveExposureConsent,
@@ -35,12 +42,25 @@ pub enum Command {
     Switches(Switches),
     /// A new label for a verified contact (only this PC sees it).
     RenameContact { contact: Handle, name: String },
+    /// The contact sheet's claimed-name note (Android `bindClaim`): seen
+    /// ("Ignore") or, with `use_it`, also saved as your label for them
+    /// (a rename; it never changes how they were verified).
+    ClaimedName { contact: Handle, use_it: bool },
     /// Forget a verified contact (they must be verified again in person).
     ForgetContact(Handle),
     /// Block or unblock calls from a verified contact (full fingerprint).
     SetBlocked { contact: Handle, blocked: bool },
     /// Block or unblock a caller from Recent calls (its full fingerprint).
     BlockCaller { fingerprint: [u8; 32], blocked: bool },
+    /// Blocked people > Reset block list: delete the list (also an unreadable one).
+    ResetBlocked,
+    /// Sent by the contact layer after a block, unblock or reset was saved:
+    /// the radio owner reopens its stores and reads the list again (Live).
+    BlocksChanged,
+    /// "Block this person" while watching: the watched route stays hidden
+    /// for this run (`source`: the source's node ID; `route`: the route this
+    /// PC authenticated, which may differ from the row that was tapped).
+    HideWatchedStream { source: [u8; 16], route: meshlive::stream_watch::StreamRoute },
     /// Forget every verified contact (the way out of a damaged store).
     ResetContacts,
     /// Call a verified contact by its recognised rotating ID (node ID =
@@ -69,15 +89,21 @@ pub enum Command {
     /// code arrives as `Update::Meet(Searching)` and goes into the same scan
     /// as a typed one; a camera that can't be used as `Meet(Failed(reason))`.
     QrCamera(bool),
-    /// CF-PRES-07 "Reset presence key": delete a damaged presence store (only
-    /// when it is latched damaged; shown with the Visibility note that says so).
-    /// Handled by the radio backend; the button is on the Calls page note.
+    /// "Reset private ID" (Settings > Privacy, and the Status sheet's Reset
+    /// for damaged keys): a damaged presence store is deleted, a healthy one
+    /// starts a new generation and window (Android `resetKey`). The radio
+    /// backend answers with `Update::PrivateIdReset`.
     ResetPresenceKey,
     /// "Not now" on the crash prompt: forget the pending crash report.
     DismissCrashReport,
     /// Open Windows Settings > Bluetooth (the backend launches
     /// ms-settings:bluetooth; MeshLive never switches the radio itself).
     OpenBluetoothSettings,
+    /// Contact us, Report a bug and Tell MeshLive: open an email draft to
+    /// MeshLive in the user's email app (`meshlive::reporting`; no
+    /// identifiers). The contact layer answers `Update::MailDraftFailed`
+    /// when no email app took it.
+    OpenMailDraft(meshlive::reporting::Draft),
 }
 
 /// Why a call ended, when the backend knows more than the call signals
@@ -94,6 +120,12 @@ pub enum CallEndReason {
     Ended,
     /// The caller of a pseudonym<->pseudonym call did not prove who it is in time.
     Unconfirmed,
+    /// WP6: the other person turned out to be someone you blocked (Android
+    /// `BLOCKED_AFTER_REVEAL_MESSAGE`).
+    BlockedPerson,
+    /// The phone stopped receiving this PC while Windows Bluetooth on this PC
+    /// was not responding (the restart guidance is on the shell notice).
+    PcBluetoothNotResponding,
 }
 impl CallEndReason {
     pub fn text(self) -> &'static str {
@@ -104,8 +136,21 @@ impl CallEndReason {
             CallEndReason::Busy => "Busy",
             CallEndReason::Ended => "Call ended",
             CallEndReason::Unconfirmed => "Couldn't confirm who this is",
+            CallEndReason::BlockedPerson => "Call ended: this is someone you blocked.",
+            CallEndReason::PcBluetoothNotResponding => "Call dropped: Bluetooth on this PC stopped responding",
         }
     }
+}
+
+/// Where this PC's identity key is kept, as Settings > Privacy says it (SEC-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityKey {
+    /// This PC's security chip holds it.
+    Chip,
+    /// The software provider holds it (said only with the experiment on).
+    Windows,
+    /// A record says the chip holds it, but the chip cannot open it now.
+    ChipUnavailable,
 }
 
 /// The peer's decoded pictures for the active call (compared by identity).
@@ -133,6 +178,8 @@ pub enum Update {
     WatchNote(Option<String>),
     WatchRoute(u8),
     WatchTitle(String),
+    /// The radio being listened to: its sound level, 0..1 (about ten a second).
+    WatchLevel(f32),
     LiveNote(Option<String>),
     People(Vec<Person>),
     Contacts(Vec<Contact>),
@@ -163,6 +210,8 @@ pub enum Update {
     CallMediaInfo { direction: &'static str, text: String },
     /// The diagnostics report was saved (its path) or why not.
     DiagnosticsSaved(Result<String, String>),
+    /// WP6NF: saving the settings failed (false) or worked (true).
+    SettingsSaved(bool),
     /// Where the peer's decoded pictures appear during this call.
     CallPictures(PictureHandle),
     /// This PC's own camera pictures (small, mirrored) for the call screen's
@@ -170,9 +219,12 @@ pub enum Update {
     CallSelfPictures(PictureHandle),
     /// The peer's verified name label (CF-REC-43); shown for an unverified peer.
     CallPeerName(String),
+    /// A name label signed by a call peer's authenticated real key (its full
+    /// fingerprint). The contact layer keeps it as a claim when the peer is
+    /// a verified contact (Naming v2) and never passes it to the screens.
+    PeerClaimedName { fingerprint: [u8; 32], name: String },
     /// A stranger caller's generated name (names-v2 of its throwaway node ID,
-    /// Android `strangerGeneratedName`); shown while Friendly names is on and
-    /// no name label replaced it.
+    /// Android `strangerGeneratedName`); shown unless a name label replaced it.
     CallPeerGenerated(String),
     /// The call's microphone: None = on (capturing for this call); Some =
     /// unusable, with the reason the user reads.
@@ -186,13 +238,26 @@ pub enum Update {
     /// Windows is paired with the phone of the active call at the Bluetooth
     /// level, so the link identifies this PC even in a private call.
     CallBonded,
+    /// The current call's audio outputs, (endpoint id, name), and the one in use.
+    CallOutputs { outputs: Vec<(String, String)>, current: Option<String> },
+    /// How many cameras this PC has (from the camera that opened).
+    Cameras(usize),
     CallLinkLost,
+    /// A call was declined without ringing because "Block unknown callers"
+    /// is on (Android `RecentCalls.recordBlocked`): Recent lists a "Blocked
+    /// call" that names nobody. Sent by the radio owner once its silent
+    /// decline reports it (not in WP11: `radio_backend.rs`).
+    #[cfg_attr(not(test), allow(dead_code))]
+    CallBlockedUnknown,
     /// The call never got past setup (CF-CALL-21): the text the user reads,
     /// e.g. "Not found nearby" or "Couldn't connect the call: ...".
     CallSetupFailed(String),
     /// Bluetooth went off or keeps failing (CF-LIFE-13/15): the text the user
     /// reads; None when it is back.
     BluetoothNote(Option<String>),
+    /// Windows Bluetooth stopped answering (a start call never returned):
+    /// true until a later start works.
+    BluetoothNotResponding(bool),
     /// Contacts seen nearby by their recognised rotating ID, and contacts
     /// whose lease this PC holds (node IDs = fingerprint[0..16]).
     ContactsNearby { nearby: Vec<[u8; 16]>, leased: Vec<[u8; 16]> },
@@ -214,6 +279,8 @@ pub enum Update {
     /// alert, presence exchanged (the text the user reads).
     CodeScanned(String),
     Live(LiveEvent),
+    /// An audio-only broadcast's microphone level, 0..1 (about ten a second).
+    LiveLevel(f32),
     /// Design QW: this PC is announced to phones (`visible`), or why not.
     Visibility { visible: bool, note: Option<String> },
     /// What a real announcement start proved (the Receive calls gate).
@@ -231,6 +298,25 @@ pub enum Update {
     /// This PC's ID as Android shows it (`names::handle` of the identity
     /// fingerprint's first 6 bytes, `SSSSS-SSSSS`); None when there is none.
     OwnId(Option<String>),
+    /// Where this PC's identity key is kept (SEC-11), said in Settings >
+    /// Privacy; sent only when the security chip holds it or the
+    /// `MESHLIVE_TPM_IDENTITY` experiment is on.
+    IdentityKey(Option<IdentityKey>),
+    /// The answer to `Command::ResetPresenceKey`: true when this PC's private
+    /// ID was reset (Settings > Privacy says so).
+    PrivateIdReset(bool),
+    /// Everyone blocked on this PC (Settings > Privacy > Blocked people).
+    Blocked(BlockedView),
+    /// What a block, unblock or reset of one person did (the screen says it).
+    BlockChanged { fingerprint: [u8; 32], name: String, change: meshlive::blocking::BlockChange },
+    /// The stream being watched comes from this authenticated key (a direct
+    /// route): "Block this person" can be offered.
+    WatchSource { id: u64, fingerprint: [u8; 32], route: meshlive::stream_watch::StreamRoute },
+    /// The stream's source is a blocked person: the watch worker left it.
+    WatchSourceBlocked { id: u64 },
+    /// No email app opened the draft: the address is shown to copy
+    /// (Android `ContactEmailUi`'s fallback).
+    MailDraftFailed,
     /// The made-up name phones nearby show for this PC (Android `StrangerNames`
     /// of the role-0 rotating ID on air; names-v2 shared vectors). It changes
     /// with the ID at every epoch boundary; None while this PC is not on air.
@@ -367,6 +453,7 @@ impl ScriptedBackend {
             nearby: true,
             lease: true,
             blocked: false,
+            ..Default::default()
         }]));
         b
     }
@@ -378,7 +465,7 @@ impl Backend for ScriptedBackend {
     fn command(&mut self, command: Command) {
         use meshlive::call::Signal;
         match &command {
-            Command::Watch(_) => {
+            Command::Watch { .. } => {
                 self.push(Update::Watch(WatchEvent::Connected));
                 if self.drop_watch_after_connect {
                     self.push(Update::Watch(WatchEvent::Lost));
@@ -414,7 +501,8 @@ impl Backend for ScriptedBackend {
                 self.push(Update::Meet(MeetEvent::Ask { name: "Green Heron".into() }));
             }
             Command::ConfirmScan { yes: true, name } => {
-                let name = name.clone();
+                // An empty "Save contact as" keeps their ID (here the sample name).
+                let name = if name.is_empty() { "Green Heron".to_owned() } else { name.clone() };
                 self.push(Update::Meet(MeetEvent::Done(format!("{name} is now a verified contact."))));
             }
             Command::ConfirmScan { yes: false, .. } => self.push(Update::Meet(MeetEvent::Failed("Nothing was saved.".into()))),

@@ -23,6 +23,19 @@ pub enum Event {
     On,
     /// No camera can be used: the plain reason.
     Unavailable(String),
+    /// How many cameras this PC has (sent when a camera opens): Flip works
+    /// with two or more.
+    Cameras(usize),
+}
+
+/// The camera Flip chose last (an index in Windows' order); every camera
+/// start opens it, so the choice survives Pause, Camera off and the next
+/// call. A camera that is gone falls back to the first.
+static CHOSEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Flip's next camera (pure): the following one in Windows' order, wrapping.
+pub fn next_camera(current: usize, count: usize) -> usize {
+    if count == 0 { 0 } else { (current + 1) % count }
 }
 
 /// NV12 plane means (Y, U, V), 0..255.
@@ -84,6 +97,8 @@ pub struct CallCamera {
     frames: Receiver<Vec<u8>>,
     events: Receiver<Event>,
     stop: Arc<AtomicBool>,
+    /// Flip was pressed: the thread opens the next camera.
+    switch: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -123,11 +138,18 @@ impl CallCamera {
         let (event_tx, events) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
+        let switch = Arc::new(AtomicBool::new(false));
+        let flip = switch.clone();
         let thread = std::thread::Builder::new()
             .name("meshlive-call-camera".into())
-            .spawn(move || run(width, height, frame_tx, event_tx, flag, preview))
+            .spawn(move || run(width, height, frame_tx, event_tx, flag, preview, flip))
             .ok();
-        Self { frames, events, stop, thread }
+        Self { frames, events, stop, switch, thread }
+    }
+    /// Flip (Android `switchPrivateCallCamera`): the next camera, same size;
+    /// the pictures keep flowing to the same encoder.
+    pub fn switch_camera(&self) {
+        self.switch.store(true, Ordering::Release);
     }
     /// The newest picture (older ones are dropped: never a backlog of video).
     pub fn latest(&self) -> Option<Vec<u8>> {
@@ -155,8 +177,10 @@ fn run(
     events: mpsc::Sender<Event>,
     stop: Arc<AtomicBool>,
     preview: Option<Arc<crate::video::PictureSlot>>,
+    switch: Arc<AtomicBool>,
 ) {
-    let mut camera = match Camera::open_first(width, height) {
+    let mut index = CHOSEN.load(Ordering::Relaxed);
+    let mut camera = match Camera::open_at(index, width, height) {
         Ok(camera) => camera,
         Err(error) => {
             let native = match error {
@@ -167,10 +191,24 @@ fn run(
             return;
         }
     };
+    if index >= camera.devices {
+        index = 0;
+    }
     let _ = events.send(Event::On);
+    let _ = events.send(Event::Cameras(camera.devices));
     let mut blanks = LeadingBlankFrames::new(drop_leading_blank_frames());
     let mut shown_at: Option<Instant> = None;
     while !stop.load(Ordering::Acquire) {
+        if switch.swap(false, Ordering::AcqRel) && camera.devices > 1 {
+            // The next camera opens before the current one closes; one
+            // that can't be opened leaves the current one on.
+            let next = next_camera(index, camera.devices);
+            if let Ok(other) = Camera::open_at(next, width, height) {
+                camera = other;
+                index = next;
+                CHOSEN.store(next, Ordering::Relaxed);
+            }
+        }
         match camera.next_frame(Instant::now() + Duration::from_millis(200)) {
             Ok(picture)
                 if blanks.checking()
@@ -218,6 +256,13 @@ mod tests {
         assert!(!LeadingBlankFrames::new(false).drop(blank, now), "off by default");
         // NV12 2x2: Y 0, one UV pair 128/128.
         assert_eq!(plane_means(&[0, 0, 0, 0, 128, 128], 2, 2), (0.0, 128.0, 128.0));
+    }
+    #[test]
+    fn flip_goes_through_every_camera_in_turn() {
+        assert_eq!((next_camera(0, 2), next_camera(1, 2)), (1, 0));
+        assert_eq!((next_camera(1, 3), next_camera(2, 3)), (2, 0));
+        assert_eq!(next_camera(0, 1), 0, "one camera: nothing to switch to");
+        assert_eq!(next_camera(5, 0), 0);
     }
     #[test]
     fn the_reason_follows_privacy_and_the_native_error() {

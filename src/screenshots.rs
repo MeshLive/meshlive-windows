@@ -206,8 +206,8 @@ fn sample(app: &mut Ui) {
         Person { id: 12, name: far.clone(), reach: Reach::Via(1), verified: false, copied: false },
     ]));
     app.apply(Update::Contacts(vec![
-        Contact { id: 10, name: contact.clone(), by_qr: true, nearby: true, lease: true, blocked: false },
-        Contact { id: 13, name: other_contact, by_qr: true, nearby: false, lease: true, blocked: false },
+        Contact { id: 10, name: contact.clone(), by_qr: true, nearby: true, lease: true, blocked: false, ..Default::default() },
+        Contact { id: 13, name: other_contact, by_qr: true, nearby: false, lease: true, blocked: false, ..Default::default() },
     ]));
     app.apply(Update::Streams(vec![
         StreamEntry { id: 1, from: contact, title: Some("Sunset over the lake".into()), audio_only: false, reach: Reach::Direct, paused: false, full: false, confirmed: true, unavailable: None },

@@ -136,6 +136,9 @@ pub enum Form {
     PcTest([u8; crate::pc_announcement::STREAM_LEN]),
     /// Design QV F1: the only announcing provider while watching or live.
     PcStream([u8; crate::pc_announcement::STREAM_LEN]),
+    /// Design SR in-call link renewal: a connectable legacy set carrying only
+    /// the per-attempt derived 128-bit UUID (no service data, nothing readable).
+    Renewal([u8; 16]),
 }
 
 /// One announcement provider; dropping it stops it and removes its handlers.
@@ -185,11 +188,143 @@ pub struct Peripheral {
     write_token: i64,
     subscribe_token: i64,
     started: bool,
+    /// The data service's start outlived its wait: its thread stops it once
+    /// Windows returns; this owner never calls it again.
+    data_stuck: bool,
     /// The subscribed phone's device, opened once for the link-state trace.
     peer_device: Option<BluetoothLEDevice>,
     /// Last observed (data service, offer alias) advertisement status, for diagnostics.
     last_status: (i32, i32),
     _apartment: Apartment,
+}
+
+/// The WinRT step the advertising start on this PC is in now (one
+/// announcement per PC), so a start that never returns can be named by the
+/// thread that gave up waiting for it (2026-11-06: `peripheral.start()`
+/// never returned on an Intel AX USB adapter).
+static STEP: Mutex<&'static str> = Mutex::new("");
+fn step(name: &'static str) {
+    *STEP.lock().unwrap_or_else(|e| e.into_inner()) = name;
+    if std::env::var_os("MESHLIVE_TRACE").is_some() {
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        eprintln!("t={ms} bluetooth phase=peripheral_step {name}");
+    }
+}
+/// The last step `start` entered (empty before any).
+pub fn current_step() -> &'static str {
+    *STEP.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// How long one `StartAdvertising` call may take. The call is synchronous and
+/// normally returns in milliseconds (Windows reports the outcome later through
+/// `AdvertisementStatus`, see `settle`). Measured 2026-11-06 on this project's
+/// Intel AX USB laptop (Windows build 26200, 19 days since boot): every
+/// `GattServiceProvider.StartAdvertising` on the PC never returned, for any
+/// service UUID and any parameters, in MeshLive and in a separate PowerShell
+/// process alike, so the radio worker waited forever.
+pub const START_CALL_LIMIT: Duration = Duration::from_secs(5);
+
+/// Starts still inside Windows after their wait ended.
+static PENDING: AtomicUsize = AtomicUsize::new(0);
+/// True while a start that outlived its wait is still inside Windows. A new
+/// start then fails at once (no second stuck thread); the owner tries again
+/// once this is false (Windows answered, e.g. after Bluetooth off and on).
+pub fn start_pending() -> bool {
+    PENDING.load(Ordering::Acquire) > 0
+}
+
+const RUNNING: u8 = 0;
+const DONE: u8 = 1;
+const ABANDONED: u8 = 2;
+
+/// Runs `call` on its own thread (its own MTA apartment) and waits at most
+/// `limit`. When the wait ends first: `Error::NotResponding`, and the call is
+/// left on its thread, which runs `late` if and when Windows returns (to stop
+/// what that start put on air). The caller never touches that provider again.
+fn bounded<T: Send + 'static>(
+    limit: Duration,
+    call: impl FnOnce() -> Result<T, Error> + Send + 'static,
+    late: impl FnOnce() + Send + 'static,
+) -> Result<T, Error> {
+    if start_pending() {
+        return Err(Error::NotResponding);
+    }
+    let state = Arc::new(std::sync::atomic::AtomicU8::new(RUNNING));
+    let shared = state.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let spawned = std::thread::Builder::new().name("meshlive-adv-start".into()).spawn(move || {
+        let apartment = Apartment::new().ok();
+        let result = call();
+        if shared.compare_exchange(RUNNING, DONE, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+            let _ = sender.send(result);
+            drop(late);
+        } else {
+            drop(result);
+            late();
+            PENDING.fetch_sub(1, Ordering::AcqRel);
+        }
+        drop(apartment);
+    });
+    if spawned.is_err() {
+        return Err(Error::Native(0x8007000Eu32 as i32));
+    }
+    match receiver.recv_timeout(limit) {
+        Ok(result) => result,
+        Err(_) => {
+            PENDING.fetch_add(1, Ordering::AcqRel);
+            if state.compare_exchange(RUNNING, ABANDONED, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                return Err(Error::NotResponding);
+            }
+            // It returned just now: its result is on the way.
+            PENDING.fetch_sub(1, Ordering::AcqRel);
+            receiver.recv().unwrap_or(Err(Error::NotResponding))
+        }
+    }
+}
+
+/// What a start that outlived its wait leaves to its thread.
+#[derive(Default)]
+struct Leftover {
+    returned: bool,
+    announcer: Option<Announcer>,
+}
+
+/// `StartAdvertising` of the data service, bounded. On `NotResponding` the
+/// provider is stopped by the thread still inside Windows once it returns.
+fn start_data(provider: &GattServiceProvider, params: GattServiceProviderAdvertisingParameters) -> Result<(), Error> {
+    let (call, stop) = (provider.clone(), provider.clone());
+    bounded(START_CALL_LIMIT, move || call.StartAdvertisingWithParameters(&params).map_err(Error::from), move || {
+        let _ = stop.StopAdvertising();
+    })
+}
+
+/// `StartAdvertising` of the announcer in `slot`, bounded. On `NotResponding`
+/// the announcer leaves `slot` for the thread still inside Windows, which
+/// stops and drops it (handlers removed) once Windows returns.
+fn start_announcer(slot: &Arc<Mutex<Option<Announcer>>>, provider: &GattServiceProvider, params: GattServiceProviderAdvertisingParameters) -> Result<(), Error> {
+    let leftover: Arc<Mutex<Leftover>> = Arc::default();
+    let (call, stop, parked) = (provider.clone(), provider.clone(), leftover.clone());
+    let result = bounded(START_CALL_LIMIT, move || call.StartAdvertisingWithParameters(&params).map_err(Error::from), move || {
+        let announcer = {
+            let mut parked = parked.lock().unwrap_or_else(|e| e.into_inner());
+            parked.returned = true;
+            parked.announcer.take()
+        };
+        let _ = stop.StopAdvertising();
+        drop(announcer);
+    });
+    if result == Err(Error::NotResponding) {
+        let taken = slot.lock().unwrap().take();
+        let mut parked = leftover.lock().unwrap_or_else(|e| e.into_inner());
+        if parked.returned {
+            // Windows answered in the meantime: stopping here no longer waits.
+            drop(parked);
+            drop(taken);
+        } else {
+            parked.announcer = taken;
+        }
+    }
+    result
 }
 
 fn parameters(connectable: bool) -> Result<GattServiceProviderAdvertisingParameters, Error> {
@@ -249,10 +384,12 @@ fn peer_tag(id: &HSTRING) -> String {
 
 fn announcer(form: Form, events: Arc<Mutex<Vec<(i32, i32)>>>, gatt: Arc<Mutex<Vec<String>>>, deadline: Instant, cancelled: &AtomicBool) -> Result<Announcer, Error> {
     let uuid = match form {
-        Form::CompactAlias(compact) => GUID::from_u128(u128::from_be_bytes(compact)),
+        Form::CompactAlias(compact) | Form::Renewal(compact) => GUID::from_u128(u128::from_be_bytes(compact)),
         Form::PcAnnouncement(_) | Form::PcTest(_) | Form::PcStream(_) => GUID::from_u128(crate::pc_announcement::UUID),
     };
+    step("announcer_create");
     let created = wait(GattServiceProvider::CreateAsync(uuid)?, deadline, cancelled)?;
+    step("announcer_created");
     if created.Error()? != BluetoothError::Success {
         return Err(Error::Bluetooth(created.Error()?.0));
     }
@@ -303,6 +440,7 @@ fn announcer(form: Form, events: Arc<Mutex<Vec<(i32, i32)>>>, gatt: Arc<Mutex<Ve
         }))?;
         notify = Some((tx, token));
     }
+    step("announcer_status_handler");
     let status_token = provider.AdvertisementStatusChanged(&TypedEventHandler::<
         GattServiceProvider,
         GattServiceProviderAdvertisementStatusChangedEventArgs,
@@ -335,6 +473,11 @@ impl Peripheral {
             Ok(crate::pc_announcement::Pc::Request(_) | crate::pc_announcement::Pc::Offer(_)) => Self::build(Form::PcStream(payload), cancelled),
             _ => Err(Error::Unsupported),
         }
+    }
+    /// Design SR: the armed side's renewal server and its per-attempt advert
+    /// (`uuid`). Registers the data service only; `start` puts it on air.
+    pub fn create_renewal(uuid: [u8; 16], cancelled: Arc<AtomicBool>) -> Result<Self, Error> {
+        Self::build(Form::Renewal(uuid), cancelled)
     }
     fn build(form: Form, cancelled: Arc<AtomicBool>) -> Result<Self, Error> {
         if cancelled.load(Ordering::Acquire) {
@@ -601,6 +744,7 @@ impl Peripheral {
             write_token,
             subscribe_token,
             started: false,
+            data_stuck: false,
             last_status: (-1, -1),
             _apartment: apartment,
         })
@@ -618,19 +762,32 @@ impl Peripheral {
         if self.started || self.io.cancelled.load(Ordering::Acquire) {
             return Err(Error::Cancelled);
         }
+        if start_pending() {
+            return Err(Error::NotResponding);
+        }
+        step("probe");
         probe().require(true)?;
         self.started = true;
-        let pc = matches!(self.form, Form::PcAnnouncement(_) | Form::PcStream(_));
+        let pc = matches!(self.form, Form::PcAnnouncement(_) | Form::PcStream(_) | Form::Renewal(_));
         let result = (|| {
             // Measured (gate 1): the data provider connectable and without
             // data stays Created while the announcement is on air.
-            self.data.StartAdvertisingWithParameters(&parameters(pc)?)?;
+            step("data_start_advertising");
+            let started = start_data(&self.data, parameters(pc)?);
+            self.data_stuck = started == Err(Error::NotResponding);
+            started?;
             if announce { self.start_announcement(self.form) } else { Ok(()) }
         })();
+        // A start still inside Windows keeps its step for the trace.
+        if result != Err(Error::NotResponding) {
+            step(if result.is_ok() { "started" } else { "start_failed" });
+        }
         if result.is_err() {
             self.io.abort();
             self.stop_announcement();
-            let _ = self.data.StopAdvertising();
+            if !self.data_stuck {
+                let _ = self.data.StopAdvertising();
+            }
         }
         result
     }
@@ -640,6 +797,9 @@ impl Peripheral {
     pub fn start_announcement(&mut self, form: Form) -> Result<(), Error> {
         if self.io.cancelled.load(Ordering::Acquire) {
             return Err(Error::Cancelled);
+        }
+        if start_pending() {
+            return Err(Error::NotResponding);
         }
         self.stop_announcement();
         self.form = form;
@@ -652,7 +812,8 @@ impl Peripheral {
                 return alias.map(|_| ());
             }
         }
-        let deadline = Instant::now() + Duration::from_secs(8);
+        // The renewal must be on air inside the protocol's 3 s registration bound.
+        let deadline = Instant::now() + Duration::from_secs(if matches!(form, Form::Renewal(_)) { 3 } else { 8 });
         let announcer = announcer(form, self.status_events.clone(), self.gatt_events.clone(), deadline, &self.io.cancelled)?;
         let provider = announcer.provider.clone();
         *self.offer.lock().unwrap() = Some(announcer);
@@ -660,7 +821,7 @@ impl Peripheral {
         let service_data: Option<&[u8]> = match &form {
             Form::PcAnnouncement(payload) => Some(payload),
             Form::PcTest(payload) | Form::PcStream(payload) => Some(payload),
-            Form::CompactAlias(_) => None,
+            Form::CompactAlias(_) | Form::Renewal(_) => None,
         };
         if let Some(payload) = service_data {
             params.SetUseLowEnergyUncoded1MPhyAsSecondaryPhy(true)?;
@@ -668,7 +829,9 @@ impl Peripheral {
             writer.WriteBytes(payload)?;
             params.SetServiceData(&writer.DetachBuffer()?)?;
         }
-        provider.StartAdvertisingWithParameters(&params)?;
+        step("offer_start_advertising");
+        start_announcer(&self.offer, &provider, params)?;
+        step("offer_settle");
         let settled = settle(&provider, service_data.is_some(), deadline, &self.io.cancelled);
         self.last_status = (self.data.AdvertisementStatus().map_or(-1, |s| s.0), settled.as_ref().map_or_else(|_| provider.AdvertisementStatus().map_or(-1, |s| s.0), |s| *s));
         if settled.is_err() {
@@ -717,10 +880,13 @@ impl Peripheral {
                 writer.WriteByte(0)?;
                 params.SetServiceData(&writer.DetachBuffer()?)?;
             }
-            provider.StartAdvertisingWithParameters(&params)?;
+            step("alias_start_advertising");
+            start_announcer(&self.alias, &provider, params)?;
+            step("alias_settle");
             settle(&provider, true, deadline, &self.io.cancelled)
         })();
         if result.is_err() {
+            step("alias_stop");
             self.alias.lock().unwrap().take();
         }
         self.alias_last = Some((uuid, result));
@@ -742,7 +908,7 @@ impl Peripheral {
             let writer = windows::Storage::Streams::DataWriter::new()?;
             writer.WriteBytes(&payload)?;
             params.SetServiceData(&writer.DetachBuffer()?)?;
-            provider.StartAdvertisingWithParameters(&params)?;
+            start_announcer(&self.test_extra, &provider, params)?;
             settle(&provider, true, deadline, &self.io.cancelled)
         })();
         if result.is_err() {
@@ -848,6 +1014,10 @@ impl Peripheral {
         let pipe = self.io.state.lock().unwrap().pipe.clone();
         pipe.read(bytes, deadline, &self.io.cancelled)
     }
+    /// WP6NH: the call's peer is blocked: no more GR1 resends.
+    pub fn fence_recovery(&mut self) {
+        self.writer.fence_recovery(&self.io);
+    }
     pub fn write(&mut self, bytes: &[u8], deadline: Instant) -> Result<(), carrier::Error> {
         let cancelled = self.io.cancelled.clone();
         self.writer.write(bytes, &mut self.io, deadline, &cancelled)
@@ -885,7 +1055,7 @@ impl Peripheral {
             None => format!("device=unavailable max_pdu={max_pdu}"),
         }
     }
-    /// Root-approved native-check routing hint for this subscribed client.
+    /// Native-check routing hint for this subscribed client.
     /// Kept in memory only; never logged or persisted by the product.
     pub fn diagnostic_peer_route(&mut self) -> Option<(u64, i32)> {
         if self.peer_device.is_none() { let _ = self.link_state(); }
@@ -895,7 +1065,9 @@ impl Peripheral {
     pub fn close(&mut self) {
         self.io.cancelled.store(true, Ordering::Release);
         self.stop_announcement();
-        let _ = self.data.StopAdvertising();
+        if !self.data_stuck {
+            let _ = self.data.StopAdvertising();
+        }
         self.io.disconnect();
     }
 }
@@ -994,6 +1166,36 @@ impl Drop for Peripheral {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_start_that_never_returns_fails_in_time_and_is_stopped_when_windows_answers() {
+        // A fake StartAdvertising that blocks until released (as on the
+        // 2026-11-06 laptop), then a working one.
+        let (release, parked) = std::sync::mpsc::channel::<()>();
+        let (stopped_tx, stopped) = std::sync::mpsc::channel::<&str>();
+        let begun = Instant::now();
+        let result = bounded(Duration::from_millis(200), move || { let _ = parked.recv(); Ok(()) }, move || { let _ = stopped_tx.send("stopped"); });
+        assert_eq!(result, Err(Error::NotResponding));
+        assert!(begun.elapsed() < Duration::from_secs(2), "the caller got control back");
+        assert!(start_pending(), "the stuck start is still inside Windows");
+        // While it is stuck, a new start fails at once and never runs.
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = ran.clone();
+        assert_eq!(bounded(Duration::from_secs(5), move || { flag.store(true, Ordering::Release); Ok(()) }, || {}), Err(Error::NotResponding));
+        assert!(!ran.load(Ordering::Acquire));
+        // Windows answers: the late start is stopped on its own thread.
+        release.send(()).unwrap();
+        assert_eq!(stopped.recv_timeout(Duration::from_secs(5)), Ok("stopped"));
+        let wait = Instant::now();
+        while start_pending() && wait.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!start_pending());
+        // The next start runs and keeps its own outcome; nothing is stopped.
+        let (late_tx, late) = std::sync::mpsc::channel::<()>();
+        assert_eq!(bounded(Duration::from_secs(5), || Ok(7), move || { let _ = late_tx.send(()); }), Ok(7));
+        assert_eq!(bounded::<()>(Duration::from_secs(5), || Err(Error::Bluetooth(2)), || {}), Err(Error::Bluetooth(2)));
+        assert!(late.recv_timeout(Duration::from_millis(100)).is_err(), "a start that returned in time is not stopped");
+    }
     #[test]
     fn deferred_request_ownership_is_bounded_and_released_on_every_drop() {
         let count = Arc::new(AtomicUsize::new(0));

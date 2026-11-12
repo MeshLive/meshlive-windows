@@ -35,7 +35,7 @@ fn the_newest_signed_title_is_shown_whatever_the_order() {
         let mut joined = Joined { reader, uplink: ViewerUplink::continue_link(
             Sealer::new(Layer::Hop, &[3; 32], Policy::default()).unwrap(),
             Sealer::new(Layer::Endpoint, &[4; 32], Policy::default()).unwrap()),
-            buffer: Vec::new(), source, parent: source, recovery_key: None,
+            buffer: Vec::new(), source, parent: source, source_fingerprint: None, recovery_key: None,
             codec_mask: 1, labels: Some(labels::container(&container)) };
         let mut writer = crate::session::SourceLink::continue_link(
             Sealer::new(Layer::Hop, &[1; 32], Policy::default()).unwrap(),
@@ -64,7 +64,7 @@ fn signed_direct_title_cannot_be_replayed_on_another_mesh_or_forwarded_stream() 
                 let mut joined = Joined { reader, uplink: ViewerUplink::continue_link(
                     Sealer::new(Layer::Hop, &[3; 32], Policy::default()).unwrap(),
                     Sealer::new(Layer::Endpoint, &[4; 32], Policy::default()).unwrap()),
-                    buffer: Vec::new(), source, parent: if forwarded { [9; 16] } else { source }, recovery_key: None,
+                    buffer: Vec::new(), source, parent: if forwarded { [9; 16] } else { source }, source_fingerprint: None, recovery_key: None,
                     codec_mask: 1, labels: Some(labels::container(&[title.clone()])) };
                 let mut writer = crate::session::SourceLink::continue_link(
                     Sealer::new(Layer::Hop, &[1; 32], Policy::default()).unwrap(),
@@ -156,6 +156,7 @@ fn authenticated_viewer_join_continues_handshake_counters_and_acknowledges_end()
     let parent = std::thread::spawn(move || source(peer, None));
     let mut joined = join(&mut pipe, &viewer, &selected, &[entry], EPOCH, 1, None, &AtomicBool::new(false)).unwrap();
     assert_eq!(joined.codec_mask, 1);
+    assert_eq!(joined.source_fingerprint.map(|f| <[u8; 16]>::try_from(&f[..16]).unwrap()), Some(joined.source), "a direct source's full key is known");
     let mut events = Vec::new();
     while events.len() < 2 {
         let mut input = joined.buffer.as_slice();
@@ -194,6 +195,7 @@ fn unanswered_direct_route_yields_to_source_bound_forwarder_media_pause_resume_a
     let parent = std::thread::spawn(move || source(peer, Some(original)));
     let mut joined = join(&mut pipe, &viewer, &selected, &[entry], EPOCH, 1, Some(original), &AtomicBool::new(false)).unwrap();
     assert_eq!(joined.source, original);
+    assert_eq!(joined.source_fingerprint, None, "a forwarder's claim names only a node ID");
     assert_ne!(joined.parent, original, "the adjacent forwarder is not the authenticated original source");
     assert!(joined.recovery_key.is_some());
     let mut states = Vec::new(); let mut header = false; let mut frame = false;
@@ -313,6 +315,79 @@ fn route_rows_prefer_joinable_routes_survive_floods_and_expire() {
     assert!(offers.best(id, 1).is_some());
     offers.prune(now + Duration::from_secs(13));
     assert!(offers.rows(1).is_empty());
+}
+
+/// The Live list as Android `hideBlockedStreams`: a blocked person's
+/// stream goes on every route once its direct route is attributed; a relay
+/// is never attributed; a hidden route goes alone (another advertiser of
+/// the same stream stays); an unblock brings a hidden route back; at most
+/// 256 routes are kept.
+#[test]
+fn blocked_sources_leave_the_live_list_and_come_back_when_unblocked() {
+    use windows::Devices::Bluetooth::BluetoothAddressType;
+    let now = Instant::now();
+    let sight = |address, a| Sighting { route: crate::bluetooth::scan::Route { address, address_type: BluetoothAddressType::Random },
+        announcement: a, rssi: -50, received: now, kind: (5, true, false) };
+    let blocked_direct = offer([1; 6], 42);
+    let mut blocked_relay = offer([2; 6], 42); blocked_relay.cost = 1;
+    let shared = offer([3; 6], 77);
+    let twin = offer([5; 6], 77);
+    let mut relayed_only = offer([4; 6], 88); relayed_only.cost = 1;
+    let lonely = offer([6; 6], 99);
+    let mut offers = Offers::default();
+    for (address, a) in [(1, blocked_direct.clone()), (2, blocked_relay), (3, shared.clone()), (5, twin), (4, relayed_only), (6, lonely.clone())] {
+        offers.observe(sight(address, a));
+    }
+    let logical = |a: &Announcement| Target::from(a).logical;
+    let shown = |rows: Vec<(u32, &Sighting)>| rows.into_iter().map(|(_, s)| Target::from(&s.announcement).logical).collect::<Vec<_>>();
+    let mut hidden = HiddenRoutes::default();
+    assert_eq!(shown(offers.visible_rows(1, &hidden, |_| false)).len(), 4);
+    let attributed = offers.visible_rows(1, &hidden, |a| a.prefix == [1; 6]);
+    assert_eq!(attributed.len(), 4, "the stream stays via its relayed route");
+    let stayed = attributed.iter().find(|(_, s)| logical(&s.announcement) == logical(&blocked_direct)).expect("the stream is not attributed away").1;
+    assert_eq!(stayed.announcement.prefix, [2; 6], "the attributed direct route goes; the relayed route stays");
+    assert_eq!(shown(offers.visible_rows(1, &hidden, |a| a.prefix == [4; 6])).len(), 4, "a relay is never attributed");
+    hidden.hide(StreamRoute::of(&lonely), [9; 16]);
+    hidden.hide(StreamRoute::of(&shared), [9; 16]);
+    let after = shown(offers.visible_rows(1, &hidden, |_| false));
+    assert!(!after.contains(&logical(&lonely)), "a hidden route goes");
+    assert!(after.contains(&logical(&shared)), "the same stream from another advertiser stays");
+    hidden.retain_sources(|node| *node != [9; 16]);
+    assert_eq!(shown(offers.visible_rows(1, &hidden, |_| false)).len(), 4, "unblocked: the routes are back");
+    for i in 0..300u32 { hidden.hide(StreamRoute { logical: i, prefix: [7; 6] }, [1; 16]); }
+    assert!(!hidden.contains(&StreamRoute { logical: 0, prefix: [7; 6] }) && hidden.contains(&StreamRoute { logical: 299, prefix: [7; 6] }));
+    hidden.clear();
+    assert!(!hidden.contains(&StreamRoute { logical: 299, prefix: [7; 6] }));
+}
+
+/// A spoofer cannot hide a genuine stream (review 2026-11-06, finding 2):
+/// only the cost-0 route attributed to a blocked person goes; another
+/// direct route or a relayed route of the same public token stays listed.
+#[test]
+fn a_spoofed_attributed_route_cannot_hide_another_advertisers_stream() {
+    use windows::Devices::Bluetooth::BluetoothAddressType;
+    let now = Instant::now();
+    let sight = |address, a| Sighting { route: crate::bluetooth::scan::Route { address, address_type: BluetoothAddressType::Random },
+        announcement: a, rssi: -50, received: now, kind: (5, true, false) };
+    let blocked_direct = offer([1; 6], 42);
+    let mut blocked_relay = offer([2; 6], 42); blocked_relay.cost = 1;
+    let other_direct = offer([3; 6], 42);
+    let mut other_relay = offer([4; 6], 42); other_relay.cost = 1;
+    let mut offers = Offers::default();
+    for (address, a) in [(1, blocked_direct.clone()), (2, blocked_relay), (3, other_direct), (4, other_relay)] {
+        offers.observe(sight(address, a));
+    }
+    let hidden = HiddenRoutes::default();
+    let only = |rows: Vec<(u32, &Sighting)>| rows.into_iter().map(|(_, s)| (s.announcement.prefix, s.announcement.cost)).collect::<Vec<_>>();
+    assert_eq!(only(offers.visible_rows(1, &hidden, |a| a.prefix == [1; 6])), vec![([3; 6], 0)], "the attributed route goes; another advertiser's direct route stays");
+    assert_eq!(only(offers.visible_rows(1, &hidden, |a| a.prefix == [2; 6])), vec![([1; 6], 0)], "a relayed route is never attributed");
+    assert_eq!(only(offers.visible_rows(1, &hidden, |_| false)), vec![([1; 6], 0)], "unblocked: the attributed route is back");
+
+    let mut only_relay = Offers::default();
+    for (address, a) in [(1, offer([1; 6], 43)), (2, { let mut r = offer([2; 6], 43); r.cost = 1; r })] {
+        only_relay.observe(sight(address, a));
+    }
+    assert_eq!(only(only_relay.visible_rows(1, &hidden, |a| a.prefix == [1; 6])), vec![([2; 6], 1)], "a relayed route of the same token stays listed");
 }
 
 #[test]

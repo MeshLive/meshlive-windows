@@ -7,6 +7,7 @@ pub mod gr1;
 pub mod pacer;
 pub mod radio_watch;
 pub mod peripheral;
+pub mod renewal;
 pub mod scan;
 use std::{
     sync::atomic::{AtomicBool, Ordering},
@@ -86,6 +87,10 @@ pub enum Error {
     /// Started without all advertisement data: the announcement is not on air.
     AdvertisingIncomplete,
     Timeout,
+    /// A synchronous Windows Bluetooth call (`StartAdvertising`) did not
+    /// return within its bound: the Bluetooth stack is not answering. Proves
+    /// nothing about the adapter's abilities.
+    NotResponding,
     Cancelled,
     Native(i32),
     /// CF-PLAT-05: Windows holds a pairing with this phone and its services
@@ -105,7 +110,7 @@ impl Error {
             Self::Native(code) | Self::Bluetooth(code) | Self::Gatt(code) => {
                 Some(gate::Refusal::Native(code))
             }
-            Self::Unsupported | Self::Radio(_) | Self::Cancelled | Self::ScanStopped(_) | Self::BondMismatch => None,
+            Self::Unsupported | Self::Radio(_) | Self::Cancelled | Self::NotResponding | Self::ScanStopped(_) | Self::BondMismatch => None,
         }
     }
 }
@@ -339,6 +344,7 @@ mod tests {
         assert_eq!(Error::Bluetooth(3).refusal(), Some(Refusal::Native(3)));
         for error in [
             Error::Cancelled,
+            Error::NotResponding,
             Error::Unsupported,
             Error::Radio(Radio::Off),
         ] {

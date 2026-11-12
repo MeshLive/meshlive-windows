@@ -352,3 +352,51 @@ fn extensions_reject_malformed_duplicate_out_of_order_critical_and_misplaced_val
             .is_err()
     );
 }
+
+#[test]
+fn the_wifi_marker_round_trips_and_a_missing_one_is_false() {
+    let mut wifi = Extensions::default();
+    wifi.wifi = true;
+    assert!(Extensions::parse(&wifi.encode().unwrap()).unwrap().wifi);
+    assert!(!Extensions::parse(&Extensions::default().encode().unwrap())
+        .unwrap()
+        .wifi);
+}
+
+#[test]
+fn a_wifi_marker_of_another_version_is_absent_but_still_placement_checked() {
+    let other = Extensions::parse(&padded(&[8, 0, 1, 2])).unwrap();
+    assert!(!other.wifi);
+    assert!(
+        other
+            .check_placement(Purpose::Link, Role::Responder, 2, Order::ResponderFirst)
+            .is_err()
+    );
+}
+
+#[test]
+fn a_wifi_marker_with_another_length_fails_the_parse() {
+    assert!(Extensions::parse(&padded(&[8, 0, 2, 1, 1])).is_err());
+    assert!(Extensions::parse(&padded(&[8, 0, 0])).is_err());
+}
+
+#[test]
+fn the_wifi_marker_is_accepted_only_in_the_initiators_link_block() {
+    let mut extensions = Extensions::default();
+    extensions.wifi = true;
+    extensions
+        .check_placement(Purpose::Link, Role::Initiator, 3, Order::ResponderFirst)
+        .unwrap();
+    for number in [2, 4] {
+        assert!(
+            extensions
+                .check_placement(Purpose::Link, Role::Responder, number, Order::ResponderFirst)
+                .is_err()
+        );
+    }
+    assert!(
+        extensions
+            .check_placement(Purpose::Endpoint, Role::Initiator, 3, Order::ResponderFirst)
+            .is_err()
+    );
+}

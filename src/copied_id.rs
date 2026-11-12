@@ -133,7 +133,7 @@ mod tests {
         assert!(!t.warned(&ID));
     }
 
-    /// Android edge-case suite m31-a15s-redmi-1: an advertiser replaced its
+    /// An Android edge-case suite (M31, A15s, Redmi): an advertiser replaced its
     /// set (new random address) 31 ms after the old one stopped, three times.
     fn handovers(t: &mut CopiedIdTracker) -> bool {
         let mut warned = false;

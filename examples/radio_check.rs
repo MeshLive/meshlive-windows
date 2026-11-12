@@ -1,4 +1,4 @@
-//! Root-approved on-air check (run only with `--approved`). No pairing, no
+//! On-air check (run only with `--approved`). No pairing, no
 //! connection is ever initiated, no device name is advertised, radio state is
 //! never changed. Three steps, about 2.5 minutes:
 //!   1. active scan, 30 s: prints every decoded MeshLive announcement;

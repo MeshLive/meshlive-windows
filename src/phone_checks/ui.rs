@@ -28,7 +28,7 @@ fn opt_in_native_window_voice_call_check() {
         options: Options { bluetooth: true, exit: Some(Duration::from_secs(if repeat { 150 } else { 90 })), ..Options::default() },
         proxy: event_loop.create_proxy(), view: None, repaint: None, started: Instant::now(), frames: Vec::new(),
         error: None, last_draw: None, occluded: None, focused: true, last_background: Instant::now(),
-        background_ticks: 0, tray: None, start_hidden: false,
+        background_ticks: 0, clipboard_clear: None, tray: None, start_hidden: false,
     };
     crate::display_state::start();
     event_loop.run_app(&mut app).unwrap();

@@ -18,6 +18,7 @@ use crate::{
     dial::{self, Dialed, Link},
     identity::Identity,
     incoming::{self, Listener, TagOwner},
+    label_policy::{CalleeContext, NamesAudience, SendMoment, callee_moment},
     opus, pc_announcement, presence, qw_policy,
     rotating::{self, OpeningEntry},
     verify_scan::Carrier,
@@ -207,6 +208,7 @@ pub fn user_text(error: &bluetooth::Error) -> String {
         Error::Bluetooth(6) | Error::Unsupported => "This PC's Bluetooth can't announce itself to phones. Calling a phone still works.".to_owned(),
         Error::Timeout => "Windows didn't put this PC's announcement on air in time.".to_owned(),
         Error::Cancelled => "The announcement was stopped.".to_owned(),
+        Error::NotResponding => bluetooth::radio_watch::RESTART_GUIDANCE.to_owned(),
         Error::Radio(_) => "Bluetooth status is unavailable, so phones can't call this PC right now.".to_owned(),
         Error::Bluetooth(code) | Error::Gatt(code) | Error::Native(code) | Error::ScanStopped(code) => {
             format!("This PC couldn't announce itself to phones (error {code:#x}).")
@@ -554,10 +556,40 @@ impl Search {
     }
 }
 
-/// This PC's name goes at Ringing only to a real-key caller met with this
-/// PC's real key, and never to a blocked caller (CF-REC-40, CF-CALL-24).
-pub fn name_at_ringing(blocked: bool, own_pseudonymous: bool, peer_pseudonymous: bool) -> bool {
-    !blocked && !own_pseudonymous && !peer_pseudonymous
+/// WP6NF finding 3: after the Invite a caller that showed its real key is
+/// screened by the session, also one CF-CALL-24 already declines, so its
+/// silent decline is bounded like every blocked end and a later block reaches
+/// the rest. (Its RV15 OPENING still goes first, so the decline looks like any
+/// other: this caller already holds this PC's real key and the lease that let
+/// it find this offer.)
+pub fn screen_real_caller<D: crate::listen::UnitDecoder>(session: &mut CallSession<D>, peer_pseudonymous: bool, fingerprint: [u8; 32]) {
+    if !peer_pseudonymous {
+        session.screen_peer(fingerprint, 0);
+    }
+}
+
+/// This PC's name moment as callee (WP4, Android `calleeMoment`, CF-REC-40),
+/// LABELS being negotiated: never to a blocked caller (CF-CALL-24) or while a
+/// search answers Busy. `caller_contact`: the caller's authenticated real
+/// fingerprint is in the loaded contact list.
+pub fn callee_name_moment(
+    blocked: bool,
+    busy: bool,
+    audience: NamesAudience,
+    has_name: bool,
+    own_pseudonymous: bool,
+    caller_contact: bool,
+) -> SendMoment {
+    if blocked || busy {
+        return SendMoment::Never;
+    }
+    callee_moment(&CalleeContext {
+        labels_negotiated: true,
+        has_name,
+        audience,
+        own_pseudonymous,
+        caller_is_verified_contact: caller_contact,
+    })
 }
 
 /// What a subscribing phone turned out to be.
@@ -719,7 +751,10 @@ pub fn answer_with_identity(
     trace("video_plan", &format!("codec={} encoders={} peer_decode={:#04x} peer_encode={:#04x}", header.codec, video_plan.len(),
         answered.peer_decode_codecs, answered.peer_capabilities.encode_codecs));
     trace("encoder_choice", &crate::call_video::choice_line(answered.peer_decode_codecs, &dial::encoders()));
-    let blocked = screen((!answered.peer_pseudonymous).then_some(answered.peer_fingerprint));
+    // CF-CALL-24, and WP6: the call policy's newest block list too (a real key).
+    let policy = crate::call_policy::CallPolicy::global().snapshot();
+    let blocked = screen((!answered.peer_pseudonymous).then_some(answered.peer_fingerprint))
+        || (!answered.peer_pseudonymous && policy.is_blocked(&answered.peer_fingerprint));
     let busy = !blocked && search.is_some_and(|s| s.busy_for((!answered.peer_pseudonymous).then_some(answered.peer_node)));
     let mut session = if busy {
         CallSession::<opus::Decoder>::incoming_busy(link, &invite, header, |c| opus::Decoder::new(c, opus::Profile::StreamOrCall), 0)
@@ -727,6 +762,9 @@ pub fn answer_with_identity(
         CallSession::<opus::Decoder>::incoming(link, &invite, header, |c| opus::Decoder::new(c, opus::Profile::StreamOrCall), 0).map(|(s, _)| s)
     }.map_err(|e| format!("invite {e:?}"))?;
     session.check_header_codecs(crate::video::decode_mask(), answered.peer_capabilities.encode_codecs);
+    // WP6/WP6NF: a caller that showed its real key (no REVEAL will come) is
+    // screened by the session, also one already declined as blocked.
+    screen_real_caller(&mut session, answered.peer_pseudonymous, answered.peer_fingerprint);
     let mut pending_labels = Vec::new();
     // CF-CALL-24: the block decision comes before anything of this PC's is
     // queued (a blocked caller gets Ringing, then a Decline, and no label).
@@ -740,13 +778,28 @@ pub fn answer_with_identity(
             }).collect::<Vec<_>>()));
             pending_labels.extend(notices);
         }
-        // A verified contact on both sides: this PC's name goes at Ringing.
-        if !busy && name_at_ringing(blocked, answered.own_pseudonymous, answered.peer_pseudonymous) {
-            if let Some(container) = crate::labels::own_call_container(&identity, &invite.call_id) {
-                session.send_labels(container);
-                trace("labels_sent", "kinds=[1] position=ringing");
-            }
+        // WP4: at Ringing to a verified contact, with Accept or after the
+        // caller's verified REVEAL by "Who sees my name"; never to a blocked
+        // caller or while searching. "Only my contacts" needs the caller's
+        // authenticated fingerprint in the loaded contact list.
+        let caller_contact = !answered.peer_pseudonymous && policy.is_contact(&answered.peer_fingerprint);
+        let moment = callee_name_moment(
+            blocked,
+            busy,
+            policy.audience(),
+            crate::labels::own_name().is_some(),
+            answered.own_pseudonymous,
+            caller_contact,
+        );
+        // Signed by the key the endpoint handshake authenticated: this PC's
+        // throwaway when it presented one, else its real key.
+        let signer = dial::name_signer(answered.own_pseudonymous, &listen.pseudonym, &identity);
+        if moment != SendMoment::Never
+            && let Some(container) = crate::labels::own_call_container(signer, &invite.call_id)
+        {
+            session.plan_own_name(moment, container);
         }
+        trace("labels_planned", &format!("role=callee moment={moment:?}"));
     }
     if answered.own_pseudonymous {
         // A stranger met this PC's throwaway: the REVEAL goes out with Accept.
@@ -778,6 +831,7 @@ pub fn answer_with_identity(
             header,
             video_plan,
             peer_real,
+            wifi: crate::dial::WifiLink::default(),
         },
         invite,
         verified: !answered.peer_pseudonymous,
@@ -904,10 +958,48 @@ mod tests {
 
         #[test]
     fn a_blocked_caller_never_gets_this_pcs_name() {
-        assert!(name_at_ringing(false, false, false));
-        assert!(!name_at_ringing(true, false, false), "blocked: no label at all");
-        assert!(!name_at_ringing(false, true, false));
-        assert!(!name_at_ringing(false, false, true));
-        assert!(!name_at_ringing(true, true, true));
+        // Blocked or Busy: no label at all, whatever the audience or keys.
+        for audience in NamesAudience::ALL {
+            for own_pseudonymous in [false, true] {
+                for contact in [false, true] {
+                    assert_eq!(callee_name_moment(true, false, audience, true, own_pseudonymous, contact), SendMoment::Never);
+                    assert_eq!(callee_name_moment(false, true, audience, true, own_pseudonymous, contact), SendMoment::Never);
+                }
+            }
+        }
+        // A caller in the loaded contact list: at Ringing, unless Nobody.
+        assert_eq!(callee_name_moment(false, false, NamesAudience::Everyone, true, false, true), SendMoment::AtRinging);
+        assert_eq!(callee_name_moment(false, false, NamesAudience::VerifiedOnly, true, false, true), SendMoment::AtRinging);
+        assert_eq!(callee_name_moment(false, false, NamesAudience::Nobody, true, false, true), SendMoment::Never);
+        // Not in the list (a stranger, or an unreadable list): with Accept for
+        // "People I call or who call me"; after its REVEAL for "Only my contacts".
+        assert_eq!(callee_name_moment(false, false, NamesAudience::Everyone, true, true, false), SendMoment::AtAccept);
+        assert_eq!(callee_name_moment(false, false, NamesAudience::VerifiedOnly, true, true, false), SendMoment::AfterRevealIfVerified);
+        assert_eq!(callee_name_moment(false, false, NamesAudience::VerifiedOnly, true, false, false), SendMoment::Never);
+        assert_eq!(callee_name_moment(false, false, NamesAudience::Everyone, false, false, true), SendMoment::Never, "no name");
+    }
+
+    /// WP6NF finding 3: a real-key caller already declined as blocked is
+    /// latched in its session (bounded writes, the hard local deadline, no
+    /// name, media or presence); a pseudonymous one is left to its REVEAL.
+    #[test]
+    fn a_blocked_real_key_caller_is_latched_even_when_already_declined() {
+        let blocked = [0x3du8; 32];
+        for (pseudonymous, latched) in [(false, true), (true, false)] {
+            let (_, mut session, _) = crate::call_session::wifi_test_support::wifi_session_pair_with(
+                |c| crate::opus::Decoder::new(c, crate::opus::Profile::StreamOrCall),
+                true,
+                false,
+            );
+            session.use_policy(std::sync::Arc::new(crate::call_policy::CallPolicy::new(crate::call_policy::Snapshot {
+                generation: 0,
+                audience: None,
+                blocked: Some(vec![blocked]),
+                contacts: None,
+            })));
+            screen_real_caller(&mut session, pseudonymous, blocked);
+            assert_eq!(session.peer_blocked(), latched, "pseudonymous={pseudonymous}");
+            assert_eq!(session.blocked_overdue(u64::MAX), latched);
+        }
     }
 }

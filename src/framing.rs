@@ -180,4 +180,23 @@ mod tests {
             Err(Error::Faulted)
         );
     }
+
+    #[test]
+    fn an_oversize_wifi_record_does_not_allocate_a_body() {
+        let policy = Policy {
+            wifi: true,
+            ..Policy::default()
+        };
+        let mut reader = HopReader::new(&[0; 32], policy).unwrap();
+        let mut header = [0u8; 17];
+        header[..4].copy_from_slice(b"BMS1");
+        header[4] = 16;
+        header[5..13].copy_from_slice(&1_u64.to_be_bytes());
+        header[13..].copy_from_slice(&113_u32.to_be_bytes());
+        assert_eq!(
+            reader.read(&mut header.as_slice(), usize::MAX),
+            Err(Error::Record(records::Error::Size))
+        );
+        assert_eq!(reader.body.capacity(), 0);
+    }
 }

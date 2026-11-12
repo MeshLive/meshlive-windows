@@ -1,4 +1,4 @@
-//! Root-approved GATT advertising diagnosis (run only with `--approved`; about
+//! GATT advertising diagnosis (run only with `--approved`; about
 //! 85 s). No connection is initiated and nothing is paired; radio state is not
 //! changed. Each case creates one fresh GattServiceProvider with the MeshLive
 //! write/notify characteristics, registers AdvertisementStatusChanged BEFORE

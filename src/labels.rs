@@ -1,6 +1,7 @@
-//! Signed peer labels (CF-REC-40..44, Android `SignedLabel`): a person name,
-//! stream title or call subject signed by the key the endpoint handshake
-//! authenticated, bound to one call ID or stream ID.
+//! Signed peer labels (CF-REC-40..44, Android `SignedLabel`): a person name or
+//! stream title signed by the key the endpoint handshake authenticated, bound
+//! to one call ID or stream ID. Kind 3 (call subject) is retired: never sent,
+//! never shown; one from an older build is skipped like an unknown kind.
 //! - `BNL1`: "BNL1" | version 1 | kind | spkiLen u16 | SPKI | sequence u32 |
 //!   bindingType | binding (16) | textLen u8 | UTF-8 | sigLen u16 | DER
 //!   signature over "BluetoothVideoMesh/Label/1" || 0x00 || every byte before
@@ -17,7 +18,10 @@ const CONTAINER: &[u8; 4] = b"BLB1";
 const DOMAIN: &[u8] = b"BluetoothVideoMesh/Label/1\0";
 pub const KIND_NAME: u8 = 1;
 pub const KIND_TITLE: u8 = 2;
-pub const KIND_SUBJECT: u8 = 3;
+/// The call subject, retired 2026-11-05 (PROTOCOL "Peer labels"): never sent
+/// or shown, never reused. An older build may still send one; `Inbox::accept`
+/// skips it silently and the call goes on.
+pub const RETIRED_KIND_SUBJECT: u8 = 3;
 pub const BINDING_CALL: u8 = 1;
 pub const BINDING_STREAM: u8 = 2;
 
@@ -59,7 +63,6 @@ fn kind_of(kind: u8) -> Option<LabelKind> {
     match kind {
         KIND_NAME => Some(LabelKind::PersonName),
         KIND_TITLE => Some(LabelKind::StreamTitle),
-        KIND_SUBJECT => Some(LabelKind::CallSubject),
         _ => None,
     }
 }
@@ -218,7 +221,7 @@ impl Inbox {
                 }
             };
             if kind_of(label.kind).is_none() {
-                continue; // unknown kinds are skipped silently
+                continue; // unknown kinds (and the retired kind 3 subject) are skipped silently
             }
             if let Err(reason) = verify(&label, signer, binding_type, binding) {
                 self.log.push(format!("SECURITY LABEL REJECTED kind={} reason={reason}", label.kind));
@@ -256,7 +259,7 @@ mod tests {
         let v = vector("labels-002");
         let i = &v["inputs"];
         let binding: [u8; 16] = hexb(i["binding"].as_str().unwrap()).try_into().unwrap();
-        let part = signed_part(3, &hexb("3001"), 0, 1, &binding, "Hi");
+        let part = signed_part(RETIRED_KIND_SUBJECT, &hexb("3001"), 0, 1, &binding, "Hi");
         assert_eq!(part, hexb(v["expected"]["signed_part"].as_str().unwrap()));
         // labels-005: Android's signed label verifies here and decodes field by field.
         let v = vector("labels-005");
@@ -314,5 +317,36 @@ mod tests {
         let mut inbox = Inbox::default();
         assert_eq!(inbox.accept(&container(&[bytes]), 0, &node, BINDING_CALL, &call), vec![KIND_NAME]);
         assert_eq!(inbox.text(KIND_NAME), Some("Asha"));
+    }
+
+    /// A kind 3 call subject exactly as an older build signs it.
+    fn older_build_subject(identity: &dyn SigningIdentity, call: &[u8; 16], text: &str) -> Vec<u8> {
+        let spki = identity.public_key().unwrap();
+        let mut bytes = signed_part(RETIRED_KIND_SUBJECT, &spki, 0, BINDING_CALL, call, text);
+        let signature = identity.sign(&[DOMAIN, bytes.as_slice()].concat()).unwrap();
+        bytes.extend_from_slice(&(signature.len() as u16).to_be_bytes());
+        bytes.extend_from_slice(&signature);
+        bytes
+    }
+
+    #[test]
+    fn a_call_subject_from_an_older_build_is_dropped_silently_and_never_sent() {
+        let identity = crate::identity::Identity::ephemeral().unwrap();
+        let spki = SigningIdentity::public_key(&identity).unwrap();
+        let node: [u8; 16] = crate::crypto::sha256(&spki).unwrap()[..16].try_into().unwrap();
+        let call = [7u8; 16];
+        let subject = older_build_subject(&identity, &call, "Water at the school");
+        let name = sign(&identity, KIND_NAME, 0, BINDING_CALL, &call, "Asha").unwrap();
+        let mut inbox = Inbox::default();
+        // The name beside it still arrives; the subject is neither held nor logged as an error.
+        assert_eq!(inbox.accept(&container(&[subject.clone(), name]), 0, &node, BINDING_CALL, &call), vec![KIND_NAME]);
+        assert_eq!(inbox.text(KIND_NAME), Some("Asha"));
+        assert_eq!(inbox.text(RETIRED_KIND_SUBJECT), None);
+        assert!(inbox.log.is_empty(), "{:?}", inbox.log);
+        // A subject on its own changes nothing.
+        let mut later = Inbox::default();
+        assert!(later.accept(&container(&[subject]), 0, &node, BINDING_CALL, &call).is_empty());
+        // This PC refuses to sign one.
+        assert_eq!(sign(&identity, RETIRED_KIND_SUBJECT, 0, BINDING_CALL, &call, "Water"), Err("kind"));
     }
 }

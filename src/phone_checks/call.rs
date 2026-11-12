@@ -18,6 +18,9 @@ fn opt_in_native_voice_call_phone_check() {
     meshlive::identity_gate::set_store_dir(Some(dir.join("call-host")));
     let _store = Store;
     let admission = if std::env::var("MESHLIVE_PHONE_CALL_MEDIA_GATE").as_deref() == Ok("0") { "0" } else { "1" };
+    // SEC-13: the permissive control arm is read only by a debug or test-hooks build.
+    assert!(admission == "1" || meshlive::control_arms::READABLE,
+        "MESHLIVE_PHONE_CALL_MEDIA_GATE=0 needs a --features test-hooks build");
     let _env = Env::set(&[("MESHLIVE_PLAYBACK_GAIN", "0"), ("MESHLIVE_CALL_BUFFERED_INPUT", "1"), ("MESHLIVE_CALL_MEDIA_GATE", admission), ("MESHLIVE_LABELS", "0")]);
     let result = if mode == "call-return-ring" {
         let mut peer = PeerPin::default();

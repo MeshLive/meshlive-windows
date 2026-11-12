@@ -47,7 +47,8 @@ each other directly.
 - Voice and video calls with Android phones nearby, in both directions
 - End-to-end encrypted, PC to phone
 - Contacts added in person by scanning each other's code
-- Missed calls, call back, block unknown callers
+- Missed calls, call back, block and report, block unknown callers
+- You choose who sees your name: people you call, only contacts, or nobody
 
 </td>
 <td width="50%" valign="top">
@@ -82,10 +83,11 @@ phones running the MeshLive Android app):
 | PC calls a phone (voice, video) | Worked: 90-second video calls to a contact, with every decoded frame shown on the phone in one daytime run (1,328 of 1,328); voice calls; calls to strangers through the Nearby list |
 | Phone calls the PC (voice, video) | Worked from four phone models (6 of 6 video calls from one of them), including a stranger's phone and a phone without extended Bluetooth scanning, which finds the PC through the compact announcement |
 | Call across a rotating-ID change | Worked: a 110-second video call across the 15-minute boundary, longest stall 0.2 s |
-| Ringing, missed and blocked calls | Worked: no answer after 60 s ends as Missed call; blocked contacts and unknown callers are declined before ringing |
+| Ringing, missed and blocked calls | Worked: no answer after 60 s ends as Missed call; unknown callers are declined before ringing when Block unknown callers is on; a blocked person's call is declined |
 | Watch a phone's live stream (beta) | Worked in bounded runs: about 5 minutes of a phone camera stream (4,439 VP9 frames, pause, resume, end); about 5 minutes of signed audio-only radio, direct and through one Android relay phone. The first picture took 3.2 s, above the 3-second target |
 | Go live from the PC (beta) | Worked in bounded runs to one phone: 5.5 minutes of audio-only radio; 2 minutes of PC camera video (1,256 frames rendered on the phone). A PC stream relayed onward by a phone did **not** pass, and occasional link stalls still end a stream |
 | Packaged (MSIX) app | Not yet checked end to end; one packaged call dropped right after it was answered |
+| Calls with MeshLive for Android 0.5.0 (this release) | Samsung S22: 12 of 12 calls ran to their planned end, 7 placed by the PC and 5 by the phone (45-second voice and video calls; about 650 video frames each way). ASUS (Android 11): 6 of 6 calls placed by the phone ran to the end; of the calls the PC placed, a voice call dropped after 9 s and 3 of 4 video calls brought the phone's video at a few frames per second (see Known limits in the release notes) |
 
 Not yet checked: Windows 10, ARM64 PCs, Bluetooth adapters other than the one above, sound quality and echo,
 several viewers at once, and the on-air privacy checks for live streams. Calls with iPhones and Macs have not been
@@ -120,9 +122,10 @@ offline checks are in [building.md](docs/dev/building.md).
 ## Try it with an Android phone
 
 1. Install [MeshLive for Android](https://github.com/MeshLive/meshlive-android/releases/latest) on a phone.
-2. On the phone, turn on **Settings > Connection > Find iPhones** (it also finds Windows PCs).
+2. On the phone, check that **Settings > Advanced > Connection > Find iPhones** is on (it is by default; it also finds
+   Windows PCs).
 3. Turn on Bluetooth on the PC and start `meshlive.exe`. **Calls > Nearby** lists the phone; press **Voice call** or
-   **Video call**. To call the PC from the phone, keep MeshLive open on the PC with **Receive calls** on.
+   **Video call**. To call the PC from the phone, keep MeshLive open on the PC with **Allow calls** on.
 
 More in the [user guide](docs/user-guide.md); how to report what you saw is in [CONTRIBUTING.md](CONTRIBUTING.md).
 

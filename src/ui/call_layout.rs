@@ -23,6 +23,31 @@ pub fn fit(area: Rect, size: [u32; 2], turns: u8) -> (Rect, Rect) {
     (on_screen, unrotated)
 }
 
+/// FILL (Android `VideoScaleMode.FILL`, "Fill screen with video", on by
+/// default; design decision 2026-11-05): the picture covers the whole area
+/// and keeps its shape; what runs past the area is cut evenly from both
+/// sides. Returns the part of the picture to show, in texture coordinates.
+pub fn fill(area: Rect, size: [u32; 2]) -> Rect {
+    let whole = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    if !(area.width() > 0.0 && area.height() > 0.0) {
+        return whole;
+    }
+    let picture = size[0].max(1) as f32 / size[1].max(1) as f32;
+    let screen = area.width() / area.height();
+    if picture > screen {
+        let cut = (1.0 - screen / picture) / 2.0;
+        Rect::from_min_max(pos2(cut, 0.0), pos2(1.0 - cut, 1.0))
+    } else {
+        let cut = (1.0 - picture / screen) / 2.0;
+        Rect::from_min_max(pos2(0.0, cut), pos2(1.0, 1.0 - cut))
+    }
+}
+
+/// `MESHLIVE_VIDEO_FIT=1` shows the whole picture with bars (FIT) instead.
+pub fn fill_screen() -> bool {
+    std::env::var("MESHLIVE_VIDEO_FIT").as_deref() != Ok("1")
+}
+
 /// Gap between the video area's edge and the self-view tile.
 pub const PIP_MARGIN: f32 = 12.0;
 /// The self-view tile's width: a share of the video area, within bounds.
@@ -138,6 +163,23 @@ mod tests {
         // A degenerate area or size never panics or goes negative.
         let (shown, _) = fit(Rect::from_min_size(pos2(0.0, 0.0), vec2(0.0, 0.0)), [0, 0], 7);
         assert!(shown.width() >= 0.0 && shown.height() >= 0.0);
+    }
+
+    #[test]
+    fn fill_covers_the_area_keeps_the_shape_and_cuts_evenly() {
+        for (area, size) in [
+            (Rect::from_min_size(pos2(0.0, 0.0), vec2(1252.0, 420.0)), [288u32, 352u32]),
+            (Rect::from_min_size(pos2(10.0, 20.0), vec2(300.0, 900.0)), [640, 360]),
+            (Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 360.0)), [1280, 720]),
+        ] {
+            let uv = fill(area, size);
+            assert!(uv.min.x >= 0.0 && uv.min.y >= 0.0 && uv.max.x <= 1.0 && uv.max.y <= 1.0, "{uv:?}");
+            assert!((uv.min.x - (1.0 - uv.max.x)).abs() < 1e-4 && (uv.min.y - (1.0 - uv.max.y)).abs() < 1e-4, "cut evenly: {uv:?}");
+            let shown = uv.width() * size[0] as f32 / (uv.height() * size[1] as f32);
+            assert!((shown - area.width() / area.height()).abs() < 0.01, "the shown part has the area's shape, so nothing is stretched");
+            assert!(uv.width() >= 0.999 || uv.height() >= 0.999, "one side is whole");
+        }
+        assert_eq!(fill(Rect::from_min_size(pos2(0.0, 0.0), vec2(0.0, 0.0)), [0, 0]), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)));
     }
 
     #[test]

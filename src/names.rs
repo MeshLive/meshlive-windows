@@ -17,14 +17,12 @@ use windows::Win32::Globalization::*;
 pub enum LabelKind {
     PersonName,
     StreamTitle,
-    CallSubject,
 }
 impl LabelKind {
     pub fn max_bytes(self) -> usize {
         match self {
             Self::PersonName => 32,
             Self::StreamTitle => 48,
-            Self::CallSubject => 64,
         }
     }
 }

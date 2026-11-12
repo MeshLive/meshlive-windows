@@ -69,8 +69,8 @@ All runs: one unit per picture (900 / 1800). Intel AV1 does not open (see above)
 
 ## Decisions
 
-- Codec order = Android ARCHITECTURE "Encoders": hardware first, AV1 before VP9, then software AV1, filtered
-  by the peer's decode mask (VP9 = bit 0, AV1 = bit 1, `MeshControlMessages.CODEC_*`). A failed open is
+- Codec order = Android ARCHITECTURE "Encoders": hardware AV1, HEVC, VP9, H.264 (HEVC and H.264 with their masters
+  on), then software AV1 and VP9, filtered by the peer's decode mask (VP9 = bit 0, AV1 = bit 1, `MeshControlMessages.CODEC_*`). A failed open is
   reported, never a silent switch; `open_planned` returns the skipped entries for display.
 - libaom settings mirror Android `NativeAomTuning.DEFAULT` + `nativeCpuUsed`/`nativeThreadCount`: real-time,
   CBR, lag 0, AQ 3, PSNR tuning, CDEF, 3 refs, WebRTC tool profile, no frame drop, keyframes only forced.

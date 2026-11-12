@@ -25,15 +25,18 @@ if ((Test-Path -LiteralPath $out) -and (Get-ChildItem -LiteralPath $out -Force |
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 if ($Build) {
+    # A package build never turns debug assertions on (they make the
+    # protection-off control arms readable); Assert-ReleaseExe.ps1 checks it.
+    $env:CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS = 'false'
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo 'scripts\Build.ps1') -Action Build -Configuration Release *> (Join-Path $out 'build.log')
     if ($LASTEXITCODE -ne 0) { throw "Release build failed ($LASTEXITCODE); see $out\build.log" }
 }
 if (-not $Exe) { $Exe = Join-Path $repo '.artifacts\cargo\x86_64-pc-windows-msvc\release\meshlive.exe' }
 if (-not (Test-Path -LiteralPath $Exe)) { throw "meshlive.exe not found: $Exe (use -Build)" }
-# The test-hooks build must never be packaged.
-if (Select-String -LiteralPath $Exe -Pattern 'MESHLIVE_TEST_DIAL' -SimpleMatch -Quiet) {
-    throw "This meshlive.exe contains the test hooks (built with --features test-hooks); package a release build."
-}
+# Neither a test-hooks build nor any build that reads the protection-off
+# control arms (debug, debug assertions on) is ever packaged.
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Assert-ReleaseExe.ps1') -Exe $Exe
+if ($LASTEXITCODE -ne 0) { throw "Refused: $Exe is not a release build (see the message above)." }
 
 $sdk = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64'
 $makeappx = Join-Path $sdk 'makeappx.exe'

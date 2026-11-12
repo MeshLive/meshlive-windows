@@ -79,7 +79,6 @@ impl State {
         if !self.armed {
             ui.switches.onboarded = true;
             ui.switches.receive_calls = true;
-            ui.switches.voice_calls = true;
             ui.switches.block_unknown = false;
             ui.switches_changed();
             self.armed = true;

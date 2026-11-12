@@ -40,6 +40,7 @@ pub struct Config<'a> {
     real: Presentation<'a>,
     stranger: Option<Presentation<'a>>,
     build_tag: Option<BuildTag>,
+    wifi: bool,
 }
 impl<'a> Config<'a> {
     pub fn new(
@@ -52,6 +53,7 @@ impl<'a> Config<'a> {
             real: Presentation::new(identity, capabilities, false)?,
             stranger: None,
             build_tag: None,
+            wifi: false,
         })
     }
     /// The identity owner supplies the protocol's per-attempt/per-epoch throwaway
@@ -76,6 +78,13 @@ impl<'a> Config<'a> {
             self.build_tag = Some(tag);
         }
         Ok(self)
+    }
+    /// The `WIFI` build marker of this PC's initiator link block (never a responder or end-to-end block).
+    pub fn with_wifi(mut self, on: bool) -> Self {
+        if self.purpose == Purpose::Link {
+            self.wifi = on;
+        }
+        self
     }
 }
 pub struct Peer {
@@ -256,6 +265,9 @@ impl<'a> Party<'a> {
         }
         extensions.pseudonym = presented.pseudonym;
         extensions.build_tag = self.config.build_tag;
+        extensions.wifi = self.config.wifi
+            && self.role == Role::Initiator
+            && self.config.purpose == Purpose::Link;
         let mut block = Zeroizing::new([0; BLOCK_BYTES]);
         block[..2].copy_from_slice(&91_u16.to_be_bytes());
         block[2..93].copy_from_slice(&presented.spki);

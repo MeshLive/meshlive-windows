@@ -1,4 +1,5 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
+mod clipboard;
 mod contact_backend;
 mod diagnostics;
 mod display_state;
@@ -115,6 +116,7 @@ struct View {
     ctx: egui::Context,
     input: egui_winit::State,
     ui: ui::Ui,
+    capture_excluded: bool,
 }
 struct App {
     options: Options,
@@ -132,6 +134,7 @@ struct App {
     focused: bool,
     last_background: Instant,
     background_ticks: u32,
+    clipboard_clear: Option<clipboard::PendingClear>,
     /// The notification-area icon (while hidden there, or after the first hide).
     tray: Option<tray::Tray>,
     /// Start hidden: launched by Windows at sign-in.
@@ -242,22 +245,51 @@ impl App {
                 None => Box::new(contact_backend::NoHooks),
             },
         );
+        // WP6NF finding 9: one read of the saved settings decides "Who sees my
+        // name" for the call code and for Settings.
+        let mut settings_read = None;
         if let Some(dir) = dir.clone() {
+            // WP4: the saved "Who sees my name" applies before the name is set.
+            let store = settings_store::SettingsStore::open_default(&dir);
+            let read = store.read();
+            contacts = contacts.with_settings(store, read.1);
+            settings_read = Some(read);
             contacts = contacts.with_profile(meshlive::profile::Profile::open_default(&dir));
-            contacts = contacts.with_settings(settings_store::SettingsStore::open_default(&dir));
             contacts = contacts.with_app_dir(dir.clone());
             // "Your ID" as Android shows it (the identity fingerprint's handle).
             let own_id = meshlive::callee::node_id().map(|node| meshlive::names::handle(&node[..6].try_into().unwrap()));
             contacts = contacts.with_own_id(own_id);
+            // SEC-11: where the identity key is kept, said when the security
+            // chip holds it (or should, but cannot open it) or the
+            // MESHLIVE_TPM_IDENTITY experiment is on.
+            use meshlive::identity::{Identity, KeyProvider};
+            use ui::backend::IdentityKey;
+            let key = match Identity::open_existing() {
+                Ok(identity) if identity.key_provider() == KeyProvider::Platform => Some(IdentityKey::Chip),
+                Ok(_) => meshlive::identity::tpm_identity_enabled().then_some(IdentityKey::Windows),
+                Err(_) if Identity::recorded_in_chip() => Some(IdentityKey::ChipUnavailable),
+                Err(_) => None,
+            };
+            contacts = contacts.with_identity_key(key);
             contacts = contacts.with_blocks(meshlive::blocking::BlockList::open_default(&dir));
+            // What contacts call themselves (Naming v2), for their contact sheet.
+            contacts = contacts.with_claims(meshlive::claims::ClaimsStore::open_default(&dir));
         }
         // A blocked launch keeps only the explicit wipe retry; no stores open.
         if let Some(dir) = app_dir { contacts = contacts.with_wipe(Box::new(move || meshlive::wipe::run_installed(&dir))); }
         let mut ui = ui::Ui::with_backend(Box::new(contacts));
         // Saved settings replace the defaults and reach the Bluetooth owner at once.
-        if let Some(saved) = dir.as_deref().and_then(|d| settings_store::SettingsStore::open_default(d).load()) {
-            ui.switches = saved;
-            ui.switches_changed();
+        if let Some((saved, audience)) = settings_read {
+            let found = saved.is_some() || audience != settings_store::AudienceLoad::Missing;
+            if let Some(saved) = saved {
+                ui.switches = saved;
+            }
+            // WP4/WP6NF: the same answer the call code got (a damaged, unknown
+            // or conflicting value is Nobody), shown in Settings.
+            ui.switches.names_audience = audience.audience();
+            if found {
+                ui.switches_changed();
+            }
         }
         if let Some(report) = resumed_wipe {
             ui.apply(ui::backend::Update::Wiped(report));
@@ -286,6 +318,7 @@ impl App {
             ctx,
             input,
             ui,
+            capture_excluded: false,
         })
     }
     fn draw(&mut self) -> AnyResult<()> {
@@ -338,6 +371,20 @@ impl App {
             view.ui.show(ctx, view.graphics.texture_id, &description)
         });
         announce_incoming(view);
+        // Before this frame is presented: no frame that can hold the code is
+        // shown unprotected.
+        let protect = view.ui.code_on_screen();
+        if protect && !view.capture_excluded {
+            exclude_from_capture(&view.window, true);
+            view.capture_excluded = true;
+        }
+        if let Some(code) = view.ui.take_clipboard_request() {
+            let copied = clipboard::copy_secret(hwnd(&view.window), &code);
+            radio_backend::trace("clipboard_copy", &format!("ok={}", copied.is_some()));
+            self.clipboard_clear = copied.map(|sequence| clipboard::PendingClear::new(Instant::now(), sequence));
+            view.ui.clipboard_done(copied.is_some());
+            view.window.request_redraw();
+        }
         let delay = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
@@ -346,6 +393,11 @@ impl App {
         let (render, platform, _) = egui_directx11::split_output(output);
         view.input.handle_platform_output(&view.window, platform);
         view.graphics.render(&view.ctx, render)?;
+        // Restored only after a frame without the code has been presented.
+        if !protect && view.capture_excluded {
+            exclude_from_capture(&view.window, false);
+            view.capture_excluded = false;
+        }
         // This includes Present wait. It is not a GPU completion or physical presentation timestamp.
         if self.options.metrics.is_some() && self.frames.len() < 65536 {
             self.frames.push(started.elapsed().as_secs_f64() * 1000.0);
@@ -467,7 +519,13 @@ impl ApplicationHandler<Event> for App {
                 tray::CloseAction::HideToTray => self.hide_to_tray(),
             },
             WindowEvent::Occluded(occluded) => self.occluded = Some(occluded),
-            WindowEvent::Focused(focused) => self.focused = focused,
+            WindowEvent::Focused(focused) => {
+                self.focused = focused;
+                // The Status sheet's notifications warning follows Windows Settings.
+                if focused {
+                    view.ui.notifications_off = notify::toasts_blocked();
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Err(e) = view.graphics.resize(size.width, size.height) {
                     self.fail(event_loop, e)
@@ -522,6 +580,18 @@ impl ApplicationHandler<Event> for App {
                 }
                 background = Some(now + Duration::from_millis(50));
             }
+            // A broadcast's audio reminder runs even when Windows does not
+            // paint the window (minimised or covered): once a second.
+            if view.ui.live_running() && !hidden && !view.ui.in_call() {
+                let painting = self.last_draw.is_some_and(|at| now - at < Duration::from_millis(1100));
+                if !painting && now - self.last_background >= Duration::from_secs(1) {
+                    self.last_background = now;
+                    view.ui.background_tick();
+                    announce_incoming(view);
+                }
+                let next = now + Duration::from_secs(1);
+                background = Some(background.map_or(next, |b| b.min(next)));
+            }
             #[cfg(test)]
             if view.ui.native_check_armed() {
                 view.ui.background_tick();
@@ -529,6 +599,28 @@ impl ApplicationHandler<Event> for App {
                 announce_incoming(view);
                 view.window.request_redraw();
                 background = Some(now + Duration::from_millis(50));
+            }
+        }
+        if let Some(pending) = self.clipboard_clear {
+            match pending.decide(now, clipboard::sequence()) {
+                clipboard::Decision::Wait(at) => background = Some(background.map_or(at, |b| b.min(at))),
+                clipboard::Decision::Clear => match clipboard::clear_if_unchanged(pending) {
+                    clipboard::Cleared::Busy => {
+                        // Kept: the code must not stay because the clipboard was busy once.
+                        radio_backend::trace("clipboard_clear", "cleared=false busy=true");
+                        let again = pending.retry_later(now);
+                        self.clipboard_clear = Some(again);
+                        background = Some(background.map_or(again.due, |b| b.min(again.due)));
+                    }
+                    cleared => {
+                        radio_backend::trace("clipboard_clear", &format!("cleared={}", cleared == clipboard::Cleared::Yes));
+                        self.clipboard_clear = None;
+                    }
+                },
+                clipboard::Decision::Leave => {
+                    radio_backend::trace("clipboard_clear", "cleared=false replaced=true");
+                    self.clipboard_clear = None;
+                }
             }
         }
         let repaint = match (self.repaint, background) {
@@ -545,8 +637,22 @@ impl ApplicationHandler<Event> for App {
     }
 }
 /// A ringing incoming call: flash the taskbar until the window is in front
-/// and show a toast when the window is not focused.
+/// and show a toast when the window is not focused. The audio broadcast's
+/// "Still broadcasting" reminder is announced the same way.
 fn announce_incoming(view: &mut View) {
+    if view.ui.take_live_reminder_alert() {
+        if view.window.is_visible() == Some(false) {
+            view.window.set_visible(true);
+            view.window.request_redraw();
+        }
+        view.window.request_user_attention(Some(winit::window::UserAttentionType::Critical));
+        if !view.window.has_focus() {
+            match notify::live_reminder() {
+                Ok(()) => radio_backend::trace("toast_shown", "kind=live_reminder"),
+                Err(error) => radio_backend::trace("toast_failed", &error),
+            }
+        }
+    }
     if let Some((peer, video)) = view.ui.take_incoming_alert() {
         // Hidden in the tray: a ringing call brings the window back.
         if view.window.is_visible() == Some(false) {
@@ -561,6 +667,30 @@ fn announce_incoming(view: &mut View) {
             }
         }
     }
+}
+
+fn hwnd(window: &Window) -> Option<HWND> {
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(HWND(handle.hwnd.get() as _)),
+        _ => None,
+    }
+}
+
+/// F2 (Android FLAG_SECURE): while Add contact is open the window is left out
+/// of screenshots, recordings, screen sharing and remote desktop.
+fn exclude_from_capture(window: &Window, on: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_MONITOR, WDA_NONE};
+    let Some(hwnd) = hwnd(window) else { return };
+    let mode = if !on {
+        if unsafe { SetWindowDisplayAffinity(hwnd, WDA_NONE) }.is_ok() { "none" } else { "none_failed" }
+    } else if unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) }.is_ok() {
+        "exclude"
+    } else if unsafe { SetWindowDisplayAffinity(hwnd, WDA_MONITOR) }.is_ok() {
+        "monitor"
+    } else {
+        "failed"
+    };
+    radio_backend::trace("capture_exclusion", &format!("on={} mode={mode}", u8::from(on)));
 }
 
 /// One MeshLive window per user session: a second start (a second click, or a
@@ -599,6 +729,8 @@ pub(crate) fn packaged() -> bool {
 }
 
 fn main() -> AnyResult<()> {
+    // SEC-13: keeps the release marker the package scripts look for in the exe.
+    std::hint::black_box(meshlive::control_arms::BUILD_MARKER);
     if activate_running_instance() {
         return Ok(());
     }
@@ -646,12 +778,28 @@ fn main() -> AnyResult<()> {
         focused: true,
         last_background: Instant::now(),
         background_ticks: 0,
+        clipboard_clear: None,
         tray: None,
         start_hidden: false,
     };
     app.start_hidden = startup::launched_at_sign_in(app.options.background, packaged());
     display_state::start();
-    event_loop.run_app(&mut app)?;
+    let run = event_loop.run_app(&mut app);
+    // SEC-11: the process's open identity key (a chip handle) is closed with the app.
+    meshlive::identity::Identity::release_cached();
+    // The code never outlives MeshLive on the clipboard.
+    if let Some(pending) = app.clipboard_clear.take() {
+        if pending.decide_at_exit(clipboard::sequence()) == clipboard::Decision::Clear {
+            // A busy clipboard gets a few more tries (about half a second) before MeshLive goes.
+            for _ in 0..10 {
+                if clipboard::clear_if_unchanged(pending) != clipboard::Cleared::Busy {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+    run?;
     app.metrics()?;
     if let Some(error) = app.error {
         return Err(error.into());
@@ -668,5 +816,39 @@ mod startup_tests {
         assert_eq!(rgba.len(), 512 * 512 * 4);
         assert!(rgba.chunks_exact(4).all(|pixel| pixel[3] == 255));
         winit::window::Icon::from_rgba(rgba, width, height).unwrap();
+    }
+
+    /// SEC-13 review: the package check takes only an exe that reads no
+    /// protection-off arm. It refuses a marker that says the arms are read,
+    /// no marker, and the test hooks; on this very test binary it agrees with
+    /// what the build reads (the release test run: packaged).
+    #[test]
+    fn the_package_check_refuses_every_build_that_reads_the_protection_arms() {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("packaging").join("Assert-ReleaseExe.ps1");
+        let check = |exe: &std::path::Path| std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(&script).arg("-Exe").arg(exe)
+            .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().unwrap().success();
+        let dir = std::env::temp_dir().join(format!("meshlive-package-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Reversed at run time (format! with literal parts is folded into one
+        // literal), so this test binary holds none of these strings whole.
+        let unreversed = |text: &str| text.chars().rev().collect::<String>();
+        let marker = |state: &str| unreversed("=SMRA-NOITCETORP-EVILHSEM") + &unreversed(state);
+        let hooks = unreversed("LAID_TSET_EVILHSEM");
+        let cases = [
+            (format!("MZ..{}..", marker("DELAES")), true),
+            (format!("MZ..{}..", marker("ELBADAER")), false),
+            ("MZ..no marker..".to_owned(), false),
+            (format!("MZ..{}..{hooks}..", marker("DELAES")), false),
+            (format!("MZ..{}..{}..", marker("DELAES"), marker("ELBADAER")), false),
+        ];
+        for (i, (bytes, packaged)) in cases.iter().enumerate() {
+            let exe = dir.join(format!("case-{i}.exe"));
+            std::fs::write(&exe, bytes).unwrap();
+            assert_eq!(check(&exe), *packaged, "case {i}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::hint::black_box(meshlive::control_arms::BUILD_MARKER);
+        assert_eq!(check(&std::env::current_exe().unwrap()), !meshlive::control_arms::READABLE);
     }
 }

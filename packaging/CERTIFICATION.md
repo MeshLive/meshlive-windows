@@ -10,10 +10,10 @@ MeshLive makes private voice and video calls with people nearby over Bluetooth L
 
 | Capability | Why |
 | --- | --- |
-| `runFullTrust` | MeshLive is a native desktop app (Rust, Win32 window with Direct3D 11). It uses WASAPI for call audio, Media Foundation for the camera and video codecs, and the Windows Bluetooth LE APIs as a GATT client and GATT server. It runs at the user's integrity level, never asks for elevation, installs no driver or service, and opens no network listener. |
-| `bluetooth` | Finding people nearby (Bluetooth LE scanning), calling them (GATT client) and receiving calls (GATT server with a connectable advertisement). Bluetooth is the only transport the app uses. |
-| `microphone` | The user's own voice in a call. The microphone is opened only while a call's media runs and closed when the call ends; the Windows privacy setting is respected and its state is shown in the call. |
-| `webcam` | The user's own video in a video call, and scanning a contact's code with the camera when adding a contact. The camera is opened only for those two moments and closed afterwards. As a packaged app MeshLive has its own entry in Settings > Privacy & security > Camera: the first use asks the user, and a denial is shown in the app with an "Open camera settings" button (the code can still be pasted). |
+| `runFullTrust` | MeshLive is a native desktop app (Rust, Win32 window with Direct3D 11). It uses WASAPI for call audio, Media Foundation for the camera and video codecs, and the Windows Bluetooth LE APIs as a GATT client and GATT server. It runs at the user's integrity level, never asks for elevation, installs no driver or service, and opens no network listener in normal use (the experimental Wi-Fi Direct carrier, off by default, opens one only when it is turned on). |
+| `bluetooth` | Finding people nearby (Bluetooth LE scanning), calling them (GATT client) and receiving calls (GATT server with a connectable advertisement). In normal use Bluetooth is the only transport; the experimental Wi-Fi Direct carrier is off by default. |
+| `microphone` | The user's own voice in a call. The microphone is opened only while a call's media runs, or while the user is live with a listener, and closed when that call or broadcast ends; the Windows privacy setting is respected and its state is shown in the call. |
+| `webcam` | The user's own video in a video call, and scanning a contact's code with the camera when adding a contact. The camera is opened only for those moments, or while the user goes live with video, and closed afterwards. As a packaged app MeshLive has its own entry in Settings > Privacy & security > Camera: the first use asks the user, and a denial is shown in the app with an "Open camera settings" button (the code can still be pasted). |
 
 No other capability is declared (no internet, no location, no contacts, no broad file access).
 
@@ -21,19 +21,19 @@ No other capability is declared (no internet, no location, no contacts, no broad
 
 Testing a call needs a second device with MeshLive (Android, free on the project's releases) within Bluetooth range.
 
-1. Start MeshLive. Settings > Profile > Your name: set a name.
+1. Start MeshLive. Settings > Your name: set a name.
 2. Calls > Nearby lists phones running MeshLive nearby. Press Video call or Voice call.
 3. On the phone, accept. Both sides see and hear each other; End call ends it.
-4. Contacts > Add contact shows this PC's code; the phone scans it, and the PC enters (or scans) the phone's code. Both sides then show each other as verified contacts.
+4. Contacts > Add contact > Show my code shows this PC's code; the phone scans it, and the PC enters (or scans) the phone's code. Both sides then show each other as verified contacts.
 5. Settings > Delete everything deletes this PC's identity, contacts and keys after typing DELETE.
 
 Without a second device the app still starts, shows its own code and settings, and explains that nobody is nearby.
 
 ## Privacy
 
-- No data leaves the device except over the Bluetooth link to the person being called or verified, encrypted end to end.
+- No call or stream content leaves the device except over Bluetooth to the other device, encrypted; reports and crash text leave only as email drafts the user reviews and sends.
 - Nothing is collected, uploaded, sold or shared; there are no analytics, ads or crash uploads.
-- Local data (identity key, verified contacts, presence keys, settings, name) is stored in the user's app data, sealed with Windows DPAPI, and deleted by Wipe or by uninstalling.
+- Local data (identity key, verified contacts, presence keys, settings, name) is stored in the user's app data, sealed with Windows DPAPI, and deleted by Delete everything or by uninstalling.
 - Privacy policy: [docs/privacy.md](../docs/privacy.md), published on the MeshLive website before submission.
 
 ## Open items before submission

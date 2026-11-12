@@ -377,6 +377,8 @@ pub struct Ui {
     pub own_id: Option<String>,
     /// Where this PC's identity key is kept (SEC-11), when the backend says.
     pub identity_key: Option<backend::IdentityKey>,
+    /// This PC's computer name (Settings > Privacy), from the backend at start.
+    pub computer_name: Option<String>,
     /// The generated name phones nearby see for this PC now (on air only).
     pub own_generated: Option<String>,
     /// The generated name the caller of the ringing call saw (a stranger's call).
@@ -545,6 +547,7 @@ impl Ui {
             own_name: None,
             own_id: None,
             identity_key: None,
+            computer_name: None,
             own_generated: None,
             answer_as: None,
             selected_person: None,
@@ -894,6 +897,7 @@ impl Ui {
             },
             Update::OwnId(id) => self.own_id = id,
             Update::IdentityKey(key) => self.identity_key = key,
+            Update::ComputerName(name) => self.computer_name = name,
             Update::MailDraftFailed => self.mail_fallback = true,
             Update::PrivateIdReset(done) => self.private_id_reset = Some(done),
             Update::Blocked(view) => {
@@ -1160,6 +1164,10 @@ impl Ui {
         } else { (true, true) };
         [self.call_sending.as_deref().filter(|_| sending), self.call_receiving.as_deref().filter(|_| receiving)]
             .into_iter().flatten().collect()
+    }
+    /// Windows Settings > System > About (rename this PC).
+    pub fn open_about_settings(&mut self) {
+        self.backend.command(Command::OpenAboutSettings);
     }
     /// "Open Bluetooth settings" (Windows Settings > Bluetooth).
     pub fn open_bluetooth_settings(&mut self) {

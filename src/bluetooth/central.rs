@@ -295,6 +295,38 @@ struct CentralIo {
     preset_check: Option<(Instant, bool)>,
 }
 
+/// The connection preset a central asks Windows for at setup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupPreset {
+    /// 30-60 ms, 4 s supervision timeout (Windows' Balanced): video calls at
+    /// setup, verification, Go live and renewal links.
+    Balanced,
+    /// 15 ms, 2 s supervision timeout (Windows' ThroughputOptimized).
+    Throughput,
+}
+
+/// The preset a call this PC places asks for at setup (`MESHLIVE_CALL_SETUP_PRESET`).
+/// Default (promoted 2026-11-13 on an A/B of 12 calls per arm in random
+/// order): a voice call asks for ThroughputOptimized and keeps it (ASUS on
+/// Android 11: 5 of 12 voice calls reached their planned end against 0 of 12
+/// on Balanced, Fisher p = 0.037; S22 11 of 12 against 10 of 12), and a video
+/// call keeps Balanced at setup and switches once it is set up, before it rings. `off`:
+/// the earlier control arm (Balanced at setup for both). `all` (or `video`,
+/// the A/B's video arm): Experimental, a video call asks for ThroughputOptimized
+/// at setup too (ASUS 6 of 12 against 3 of 12, p = 0.40: no measured win).
+pub fn setup_preset(switch: Option<&str>, voice: bool) -> SetupPreset {
+    match switch.map(str::trim) {
+        Some("off") | Some("0") => SetupPreset::Balanced,
+        Some("all") | Some("video") => SetupPreset::Throughput,
+        _ if voice => SetupPreset::Throughput,
+        _ => SetupPreset::Balanced,
+    }
+}
+
+fn call_setup_preset_switch() -> Option<String> {
+    std::env::var("MESHLIVE_CALL_SETUP_PRESET").ok()
+}
+
 impl Central {
     /// Explicit worker action only. No pairing, access request or protocol
     /// fallback. The only retry is service discovery while the link is still
@@ -304,7 +336,17 @@ impl Central {
     }
     /// `connect` that gives up at `deadline` when it is sooner than the usual bound.
     pub fn connect_until(route: &super::scan::Route, cancelled: Arc<AtomicBool>, deadline: Instant) -> Result<Self, Error> {
-        Self::connect_bounded(route, cancelled, &mut |_, _| {}, Some(deadline))
+        Self::connect_bounded(route, cancelled, &mut |_, _| {}, Some(deadline), SetupPreset::Balanced)
+    }
+    /// `connect_traced` for a call this PC places: the connection preset
+    /// asked for at setup follows `setup_preset` (`MESHLIVE_CALL_SETUP_PRESET`).
+    pub fn connect_for_call(
+        route: &super::scan::Route,
+        cancelled: Arc<AtomicBool>,
+        trace: &mut dyn FnMut(&str, &str),
+        voice: bool,
+    ) -> Result<Self, Error> {
+        Self::connect_bounded(route, cancelled, trace, None, setup_preset(call_setup_preset_switch().as_deref(), voice))
     }
     /// `connect`, reporting each WinRT step as `(step, detail)`: statuses and
     /// timings only, never an address.
@@ -313,13 +355,14 @@ impl Central {
         cancelled: Arc<AtomicBool>,
         trace: &mut dyn FnMut(&str, &str),
     ) -> Result<Self, Error> {
-        Self::connect_bounded(route, cancelled, trace, None)
+        Self::connect_bounded(route, cancelled, trace, None, SetupPreset::Balanced)
     }
     fn connect_bounded(
         route: &super::scan::Route,
         cancelled: Arc<AtomicBool>,
         trace: &mut dyn FnMut(&str, &str),
         until: Option<Instant>,
+        setup: SetupPreset,
     ) -> Result<Self, Error> {
         let separate = std::env::var("MESHLIVE_GATT_CANCEL_OWNERSHIP").as_deref() == Ok("1");
         let cancelled = ConnectCancel::new(cancelled, separate);
@@ -512,11 +555,24 @@ impl Central {
         // Windows 11 (build 22000+) lets the central ask for one of three
         // presets (measured on the S22: Balanced 30-60 ms / 4 s supervision
         // timeout, ThroughputOptimized 15 ms / 2 s, PowerOptimized 90-180 ms
-        // / 6 s; no custom values). Setup and voice use Balanced (Opus at
-        // 16-32 kbps fits easily, 4 s timeout); a video call switches to
-        // ThroughputOptimized (`request_preset`), accepting its 2 s timeout.
-        let requested = BluetoothLEPreferredConnectionParameters::Balanced()
-            .and_then(|p| io.device.RequestPreferredConnectionParameters(&p));
+        // / 6 s; no custom values). The setup request follows `setup_preset`:
+        // a video call asks for Balanced here and for ThroughputOptimized once
+        // it is set up, before it rings (`request_preset`, accepting its 2 s
+        // timeout); `MESHLIVE_CALL_SETUP_PRESET=off` keeps Balanced for voice.
+        // A voice call this PC places asks for ThroughputOptimized here and keeps
+        // it (`setup_preset`, promoted on an A/B: an ASUS on Android 11
+        // could not keep up with Balanced's 60 ms); MESHLIVE_CALL_SETUP_PRESET=all
+        // (Experimental) does the same for a video call, so a late Balanced grant
+        // never lands after its video request.
+        let (setup_name, setup_why) = match setup {
+            SetupPreset::Balanced => ("Balanced", "setup_and_voice"),
+            SetupPreset::Throughput => ("ThroughputOptimized", "setup_fast"),
+        };
+        let requested = match setup {
+            SetupPreset::Balanced => BluetoothLEPreferredConnectionParameters::Balanced(),
+            SetupPreset::Throughput => BluetoothLEPreferredConnectionParameters::ThroughputOptimized(),
+        }
+        .and_then(|p| io.device.RequestPreferredConnectionParameters(&p));
         let params = |device: &BluetoothLEDevice| {
             device
                 .GetConnectionParameters()
@@ -556,14 +612,18 @@ impl Central {
                 trace(
                     "preferred_params",
                     &format!(
-                        "call=RequestPreferredConnectionParameters(Balanced) why=setup_and_voice status={} {} ms={}",
+                        "call=RequestPreferredConnectionParameters({setup_name}) why={setup_why} status={} {} ms={}",
                         request.Status().map(|s| s.0).unwrap_or(-1),
                         params(&io.device),
                         ms()
                     ),
                 );
                 io.preferred = Some(request);
-                io.preset = "Balanced";
+                io.preset = setup_name;
+                // CF-LINK-23 for a fast setup too: read the grant back and ask once more if needed.
+                if setup == SetupPreset::Throughput {
+                    io.preset_check = Some((Instant::now() + Duration::from_millis(500), false));
+                }
             }
             Err(error) => trace(
                 "preferred_params",
@@ -999,6 +1059,25 @@ impl Drop for CentralIo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A/B of 2026-11-13 (12 calls per arm): PC-placed voice calls to an
+    /// ASUS on Android 11 reached their planned end 5 of 12 times on the fast
+    /// preset and 0 of 12 on Balanced; the S22 was unaffected. The fast preset
+    /// is the default for voice; `off` keeps the earlier control arm; video
+    /// calls stay on Balanced at setup unless the Experimental `all` arm is on.
+    #[test]
+    fn a_voice_call_asks_for_the_fast_timing_at_setup_and_a_video_call_only_on_the_experiment() {
+        assert_eq!(setup_preset(None, true), SetupPreset::Throughput, "voice: fast by default");
+        assert_eq!(setup_preset(None, false), SetupPreset::Balanced, "video: Balanced at setup, fast once set up");
+        for voice in [false, true] {
+            assert_eq!(setup_preset(Some("off"), voice), SetupPreset::Balanced, "the control arm");
+            assert_eq!(setup_preset(Some(" 0 "), voice), SetupPreset::Balanced);
+            assert_eq!(setup_preset(Some("all"), voice), SetupPreset::Throughput, "the experiment");
+            assert_eq!(setup_preset(Some("video"), voice), SetupPreset::Throughput, "the A/B's video arm");
+        }
+        assert_eq!(setup_preset(Some("fast"), false), SetupPreset::Balanced, "an unknown value keeps the default");
+        assert_eq!(setup_preset(Some("fast"), true), SetupPreset::Throughput);
+    }
     #[test]
     fn a_failed_connection_does_not_cancel_a_retry_but_the_user_still_can() {
         for separate in [false, true] {

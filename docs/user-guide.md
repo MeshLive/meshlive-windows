@@ -69,6 +69,8 @@ same if you switch between them.
   closing the window keeps MeshLive in the notification area so phones can still call; choose **Exit** there to quit.
 - **Decline:** after you decline a caller who uses a one-time ID, MeshLive offers **Block all unknown callers**.
   **Not now** is remembered.
+- **This PC's name:** Settings > Privacy > **Computer name** shows the name that phones this PC calls can read over
+  Bluetooth (when Windows can read it). Select it to rename the PC in Windows settings.
 - **Block someone:** **Block** on a contact or in Recent calls, **Decline and block** on an incoming call, or **Block
   this person** while watching or listening. Settings > Privacy has **Block unknown callers** and **Blocked people**,
   where you can unblock. A call that turns out to be with someone you blocked ends within seconds, before your camera
@@ -110,9 +112,10 @@ default). Despite its name, it also lets the phone find Windows PCs.
 - **A phone doesn't list this PC's live stream, or this PC can't watch a phone.** Live streams between a phone and a
   PC need the phone's MeshLive > Settings > Advanced > Experiments > **Find PCs** and **PC live streams**. Both are
   off by default on Android.
-- **A call this PC places stutters or drops with one phone.** Windows uses slower Bluetooth timing for voice calls
-  the PC places, and some phones (an ASUS phone on Android 11 in our tests) cannot keep up with it. Call the PC from
-  that phone instead; calls in that direction were not affected.
+- **A video call this PC places shows one phone's video at a few frames per second.** Some phones (an ASUS on Android 11
+  in our tests) cannot keep up with the slower Bluetooth timing Windows uses while a video call starts. Call the PC from
+  that phone instead; calls in that direction were not affected. Voice calls the PC places use the faster timing from
+  the start since 0.3.1.
 - **"Bluetooth on this PC stopped responding".** Windows stopped answering MeshLive's Bluetooth requests. Turn
   Bluetooth off and on in Windows settings; if that doesn't help, restart the PC. Until then, calls with some phones
   (Samsung phones in our tests) drop after about 30 seconds, and such a call ends with "Call dropped: Bluetooth on

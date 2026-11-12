@@ -22,6 +22,8 @@ pub(super) const LOCK_SCREEN_NOTE: &str = "While this PC is locked or you are pr
 /// SEC-11: where this PC's identity key is kept (Settings > Privacy).
 pub(super) const IDENTITY_KEY_CHIP: &str = "Identity key: protected by this PC's security chip";
 pub(super) const IDENTITY_KEY_WINDOWS: &str = "Identity key: stored by Windows";
+/// Under Settings > Privacy > Computer name (2026-11-12).
+pub(super) const COMPUTER_NAME_NOTE: &str = "Phones this PC calls can read this name over Bluetooth, and some keep it. To change it, select it and rename this PC in Windows settings.";
 pub(super) const IDENTITY_KEY_UNAVAILABLE: &str = "Identity key: this PC's security chip can't open it now. Calls can't start until it can. Delete everything starts a new ID.";
 const ABOUT_NOTE: &str = "Free software under the GNU GPL, version 3 or later. This Windows build is a preview.";
 /// Android `names_audience_title` and its choices (`names_audience_everyone`,
@@ -345,7 +347,24 @@ impl Ui {
             if ListRow::new("Reset private ID").icon(Icon::Shield).show(ui).clicked() {
                 self.reset_id_confirm = true;
             }
+            // What Windows tells a phone this PC calls when it asks for its
+            // Bluetooth name: the computer name (Windows Settings > About).
+            if let Some(name) = self.computer_name.clone() {
+                if ListRow::new("Computer name")
+                    .icon(Icon::Info)
+                    .trailing(Trailing::ValueChevron(name.clone()))
+                    .a11y(format!("Computer name, {name}. Opens Windows settings to rename this PC."))
+                    .show(ui)
+                    .clicked()
+                {
+                    self.open_about_settings();
+                }
+            }
         });
+        if self.computer_name.is_some() {
+            ui.add_space(8.0);
+            note(ui, COMPUTER_NAME_NOTE);
+        }
         // Design decision 2026-11-06: an unreadable block list is said where you look,
         // with Reset (it blocks nobody until it is read again or reset).
         if self.blocked_people.unreadable {

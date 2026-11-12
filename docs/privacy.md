@@ -86,7 +86,8 @@ We list these so you can judge the risk for your own situation.
 - **A phone this PC connects to can learn its Bluetooth address and computer name.** When this PC calls a phone, Windows
   connects from the PC's fixed Bluetooth address (on the PC we tested), and it answers the phone's standard Bluetooth
   request for a device name with this PC's computer name (Windows Settings > System > About). Some phones keep both in
-  their Bluetooth logs. MeshLive cannot change either; if the computer name identifies you, rename the PC.
+  their Bluetooth logs. MeshLive cannot change either; if the computer name identifies you, rename the PC. Settings >
+  Privacy > **Computer name** shows the name phones see (when Windows can read it).
 - **Going live can expose the PC's address.** Go live connects to viewers from the PC's Bluetooth
   address, which may be its fixed public address. The app asks for your consent each time you go live.
 - **Identity is not a person.** A key does not prove who owns a device. Compare codes in person for contacts you care

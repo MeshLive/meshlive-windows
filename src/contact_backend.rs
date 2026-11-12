@@ -122,6 +122,11 @@ impl ContactBackend {
         self.out.push(Update::OwnId(id));
         self
     }
+    /// This PC's computer name, for Settings > Privacy (shown only).
+    pub fn with_computer_name(mut self, name: Option<String>) -> Self {
+        self.out.push(Update::ComputerName(name));
+        self
+    }
     /// Where the identity key is kept, for Settings > Privacy (SEC-11).
     pub fn with_identity_key(mut self, key: Option<crate::ui::backend::IdentityKey>) -> Self {
         self.out.push(Update::IdentityKey(key));
@@ -663,6 +668,10 @@ crash report (newest):
             Command::OpenBluetoothSettings => {
                 // Windows Settings > Bluetooth; the app never switches the radio.
                 let _ = meshlive::bluetooth::radio_watch::open_settings();
+            }
+            Command::OpenAboutSettings => {
+                // Windows Settings > System > About: the user renames the PC there.
+                let _ = meshlive::bluetooth::radio_watch::open_about_settings();
             }
             Command::OpenMailDraft(draft) => {
                 // Only the fixed draft text and the version: nothing of this

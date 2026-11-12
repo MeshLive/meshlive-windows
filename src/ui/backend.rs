@@ -99,6 +99,9 @@ pub enum Command {
     /// Open Windows Settings > Bluetooth (the backend launches
     /// ms-settings:bluetooth; MeshLive never switches the radio itself).
     OpenBluetoothSettings,
+    /// Settings > Privacy > Computer name: Windows Settings > System > About
+    /// (ms-settings:about), where the PC is renamed.
+    OpenAboutSettings,
     /// Contact us, Report a bug and Tell MeshLive: open an email draft to
     /// MeshLive in the user's email app (`meshlive::reporting`; no
     /// identifiers). The contact layer answers `Update::MailDraftFailed`
@@ -302,6 +305,9 @@ pub enum Update {
     /// Privacy; sent only when the security chip holds it or the
     /// `MESHLIVE_TPM_IDENTITY` experiment is on.
     IdentityKey(Option<IdentityKey>),
+    /// This PC's computer name for Settings > Privacy (phones it calls can
+    /// read it over Bluetooth); None when Windows could not say. Shown only.
+    ComputerName(Option<String>),
     /// The answer to `Command::ResetPresenceKey`: true when this PC's private
     /// ID was reset (Settings > Privacy says so).
     PrivateIdReset(bool),

@@ -223,7 +223,7 @@ pub fn dial_bmh2(
     trace: &mut dyn FnMut(&str, &str),
 ) -> Result<Dialed, Error> {
     let mut central =
-        Central::connect_traced(route, cancelled.clone(), &mut *trace).map_err(at(Stage::Connect))?;
+        Central::connect_for_call(route, cancelled.clone(), &mut *trace, voice).map_err(at(Stage::Connect))?;
     trace("gatt_connected", "service=c8d5a105 cccd=notify");
     let reached = crate::verify_scan::bmh2_handshake(&mut central, prefix, identity, &cancelled, &mut *trace)?;
     let peer_discovery = reached.negotiated;
@@ -1435,7 +1435,7 @@ fn dial_selected_route(
 ) -> Result<Dialed, Error> {
     let wall = wall_epoch().ok_or(fail(Stage::Connect, "clock before 1970"))?;
     let mut central =
-        Central::connect_traced(route, cancelled.clone(), &mut *trace).map_err(at(Stage::Connect))?;
+        Central::connect_for_call(route, cancelled.clone(), &mut *trace, voice).map_err(at(Stage::Connect))?;
     trace("gatt_connected", "service=c8d5a105 cccd=notify");
 
     // Link handshake as a stranger: a fresh test identity plus a per-attempt throwaway.
@@ -1742,7 +1742,9 @@ pub(crate) fn dialer_endpoint_transport(link_transport: u8, relay_hops: u8, rene
 }
 
 /// Video calls ask Windows for ThroughputOptimized (15 ms, 2 s timeout);
-/// voice calls keep the Balanced preset set at connect (4 s timeout).
+/// voice calls keep the preset set at connect: ThroughputOptimized by default
+/// (`bluetooth::central::setup_preset`), Balanced with `MESHLIVE_CALL_SETUP_PRESET=off`.
+/// With the preset already in force the request is a no-op.
 fn call_preset(central: &mut Central, voice: bool, trace: &mut dyn FnMut(&str, &str)) {
     if !voice {
         central.request_preset(true, "video_call", trace);
@@ -1776,7 +1778,7 @@ pub fn dial_contact(
     use crate::{bmh3::handshake::ContactTag, verify_scan};
     let wall = wall_epoch().ok_or(fail(Stage::Connect, "clock before 1970"))?;
     let mut central =
-        Central::connect_traced(route, cancelled.clone(), &mut *trace).map_err(at(Stage::Connect))?;
+        Central::connect_for_call(route, cancelled.clone(), &mut *trace, voice).map_err(at(Stage::Connect))?;
     trace("gatt_connected", "service=c8d5a105 cccd=notify");
     let tag = || -> Result<ContactTag, rotating::Error> {
         let key = rotating::contact_tag_key(&who.lease_key)?;

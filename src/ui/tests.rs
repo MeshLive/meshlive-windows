@@ -1993,6 +1993,25 @@ fn your_code_opens_add_contact() {
     assert!(rig.ui.meet.as_ref().is_some_and(|m| m.show_code), "on Show my code (Android EXTRA_SHOW_CODE)");
 }
 
+/// 2026-11-12: a phone this PC calls can read its computer name over
+/// Bluetooth. Settings > Privacy shows which name, says so, and selecting it
+/// opens Windows' About page to rename the PC; without a name, no row.
+#[test]
+fn privacy_shows_the_computer_name_phones_can_read_and_opens_windows_to_rename_it() {
+    let mut rig = Rig::full();
+    rig.size = egui::vec2(1000.0, 3000.0);
+    rig.ui.page = Page::Settings;
+    rig.ui.settings_page = SettingsPage::Privacy;
+    assert!(!rig.contains("Computer name"), "Windows gave no name: no row");
+    rig.send(Update::ComputerName(Some("ASHA-LAPTOP".into())));
+    rig.ui.pump();
+    assert!(rig.contains("ASHA-LAPTOP"), "the name phones can read is shown");
+    assert!(rig.painted("can read this name over Bluetooth"), "and what it means");
+    rig.click("Computer name, ASHA-LAPTOP. Opens Windows settings to rename this PC.");
+    assert!(rig.log().contains(&Command::OpenAboutSettings), "selecting it opens Windows' About page");
+    assert_eq!(rig.ui.settings_page, SettingsPage::Privacy, "MeshLive stays on Privacy");
+}
+
 /// Android's Settings tree: every page opens from its row, and Back or
 /// Escape returns to the top page; the rail's Settings item does too.
 #[test]

@@ -271,6 +271,7 @@ impl App {
                 Err(_) => None,
             };
             contacts = contacts.with_identity_key(key);
+            contacts = contacts.with_computer_name(meshlive::bluetooth::radio_watch::computer_name());
             contacts = contacts.with_blocks(meshlive::blocking::BlockList::open_default(&dir));
             // What contacts call themselves (Naming v2), for their contact sheet.
             contacts = contacts.with_claims(meshlive::claims::ClaimsStore::open_default(&dir));

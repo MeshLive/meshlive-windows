@@ -108,6 +108,34 @@ pub fn open_settings() -> bool {
     result.0 as isize > 32
 }
 
+/// Windows Settings > System > About, where the PC is renamed.
+pub fn open_about_settings() -> bool {
+    use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+    let result = unsafe {
+        ShellExecuteW(None, windows::core::w!("open"), windows::core::w!("ms-settings:about"), None, None, SW_SHOWNORMAL)
+    };
+    result.0 as isize > 32
+}
+
+/// This PC's computer name: what Windows answers when a phone this PC
+/// connects to asks for its Bluetooth device name (2026-11-12: a
+/// Samsung phone read it and kept it in its Bluetooth logs). Shown in
+/// Settings > Privacy only; never traced, exported or sent by MeshLive.
+pub fn computer_name() -> Option<String> {
+    use windows::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+    let mut len = 0u32;
+    // The first call reports the size needed (and fails with ERROR_MORE_DATA).
+    let _ = unsafe { GetComputerNameExW(ComputerNameDnsHostname, None, &mut len) };
+    if len == 0 || len > 1024 {
+        return None;
+    }
+    let mut buffer = vec![0u16; len as usize];
+    unsafe { GetComputerNameExW(ComputerNameDnsHostname, Some(windows::core::PWSTR(buffer.as_mut_ptr())), &mut len) }.ok()?;
+    let name = String::from_utf16_lossy(&buffer[..(len as usize).min(buffer.len())]);
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 /// The user-facing guidance for a suspected crash loop (CF-LIFE-15).
 pub const CRASH_LOOP_GUIDANCE: &str =
     "Bluetooth keeps turning off. Turn Bluetooth off and on in Windows settings, or restart this PC.";

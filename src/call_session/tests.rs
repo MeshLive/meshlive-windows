@@ -2409,7 +2409,7 @@ fn a_blocked_callers_labels_and_presence_records_are_ignored() {
     assert!(callee.take_presence_records().is_empty());
 }
 
-/// WP6 (B9): with Wi-Fi negotiated, this PC as the initiator sends no CAPS
+/// WP6: with Wi-Fi negotiated, this PC as the initiator sends no CAPS
 /// before the callee's REVEAL is done, and none once that REVEAL showed a
 /// blocked person, whatever the callee sends.
 #[test]

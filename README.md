@@ -20,6 +20,8 @@ No internet, no SIM, no account.
 
 <a href="docs/dev/building.md"><img alt="Build from source" src="https://img.shields.io/badge/Build_from_source-Windows_11_x64-181717?style=for-the-badge&logo=rust&logoColor=white" /></a>
 
+<p>Downloads for every platform (Windows, Android, iPhone, Mac): <a href="https://meshlive.github.io"><b>meshlive.github.io</b></a></p>
+
 <sub>Free · open source · beta · <a href="docs/user-guide.md">User guide</a> · <a href="docs/devices.md">Which PCs work</a></sub>
 
 <br/>
@@ -71,8 +73,8 @@ going live from the PC to one phone. On a PC that cannot do this, the Live tab s
 
 MeshLive for Windows is **beta-quality**. Testers can download an unsigned zip from the
 [releases page](https://github.com/MeshLive/meshlive-windows/releases/latest) (check it against `SHA256SUMS`; see the
-[user guide](docs/user-guide.md#release-zip-testers)) or build it from source. There is no Microsoft Store listing or
-code-signed download yet. It has not had an independent security audit: do not rely on it where your safety depends
+[user guide](docs/user-guide.md#release-zip-testers)) or build it from source. Microsoft Store: coming soon. There is
+no code-signed download yet. It has not had an independent security audit: do not rely on it where your safety depends
 on it.
 
 What has been tried on real hardware (one Windows 11 x64 laptop with an Intel Bluetooth adapter, against Android
@@ -90,8 +92,9 @@ phones running the MeshLive Android app):
 | Calls with MeshLive for Android 0.5.0 (this release) | Samsung S22: 12 of 12 calls ran to their planned end, 7 placed by the PC and 5 by the phone (45-second voice and video calls; about 650 video frames each way). ASUS (Android 11): 6 of 6 calls placed by the phone ran to the end; of the calls the PC placed, voice calls held only with 0.3.1's faster Bluetooth timing (5 of 12 ran to their planned end, against 0 of 12 before; Samsung unaffected), and video calls still sometimes bring that phone's video at a few frames per second (see Known limits in the release notes) |
 
 Not yet checked: Windows 10, ARM64 PCs, Bluetooth adapters other than the one above, sound quality and echo,
-several viewers at once, and the on-air privacy checks for live streams. Calls with iPhones and Macs have not been
-tested. The details and the open gates are in [testing](docs/dev/testing.md).
+several viewers at once, and the on-air privacy checks for live streams. Calls between this Windows app and the
+iPhone app (on the App Store) or the Mac app have not been tested yet. The details and the open gates are in
+[testing](docs/dev/testing.md).
 
 ## Requirements
 
@@ -167,9 +170,9 @@ The wire format and security rules are shared by every MeshLive app and live in
 | Repository | What it is |
 | --- | --- |
 | [meshlive-android](https://github.com/MeshLive/meshlive-android) | The Android app; owns the protocol and the design records |
-| [meshlive-apple](https://github.com/MeshLive/meshlive-apple) | iPhone and Mac app (early) |
+| [meshlive-apple](https://github.com/MeshLive/meshlive-apple) | iPhone app ([App Store](https://apps.apple.com/app/id6834136798)) and Mac app |
 | [meshlive-benchmarks](https://github.com/MeshLive/meshlive-benchmarks) | Measured results on real phones |
-| [meshlive.github.io](https://meshlive.github.io) | Website and privacy policy |
+| [meshlive.github.io](https://meshlive.github.io) | Website: downloads for every platform, and the privacy policy |
 
 ## Contributing
 

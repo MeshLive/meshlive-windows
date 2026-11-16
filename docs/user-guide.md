@@ -19,18 +19,21 @@ MeshLive for Windows is in **beta**. Download the tester zip from the
 
 ## Install
 
-### Microsoft Store (planned)
+### Microsoft Store (coming soon)
 
-A Store listing is planned. The Store will install MeshLive, keep it up to date and sign it, so Windows trusts it.
+MeshLive is coming soon to the Microsoft Store. The Store will install it, keep it up to date and sign it, so Windows
+trusts it. Downloads for every platform (Windows, Android, iPhone, Mac) are listed on
+[meshlive.github.io](https://meshlive.github.io).
 
 ### Release zip (testers)
 
-1. Download the zip and `SHA256SUMS` from the [releases
-page](https://github.com/MeshLive/meshlive-windows/releases/latest). Check the zip in PowerShell with `Get-FileHash
-.\MeshLive-<version>-windows-x64.zip -Algorithm SHA256` and compare the hash with the zip's line in `SHA256SUMS`. If
-they differ, delete the zip. 2. Extract it to a folder you keep, for example a `MeshLive` folder in your Documents. 3.
-Run `meshlive.exe`. Windows SmartScreen may show "Windows protected your PC" because the zip is not code-signed. If the
-hash matched, choose **More info**, then **Run anyway**.
+1. Download the zip and `SHA256SUMS` from the
+   [releases page](https://github.com/MeshLive/meshlive-windows/releases/latest). Check the zip in PowerShell with
+   `Get-FileHash .\MeshLive-<version>-windows-x64.zip -Algorithm SHA256` and compare the hash with the zip's line in
+   `SHA256SUMS`. If they differ, delete the zip.
+2. Extract it to a folder you keep, for example a `MeshLive` folder in your Documents.
+3. Run `meshlive.exe`. Windows SmartScreen may show "Windows protected your PC" because the zip is not code-signed. If
+   the hash matched, choose **More info**, then **Run anyway**.
 
 On first run the zip version adds a **MeshLive** entry to your Start menu. Windows needs it to show MeshLive's
 notifications (an incoming call while the app is in the background).
